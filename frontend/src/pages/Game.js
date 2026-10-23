@@ -90,6 +90,9 @@ function Game({ socket }) {
   ];
 
   useEffect(() => {
+    const handleConnect = () => setIsConnected(true);
+    const handleDisconnect = () => setIsConnected(false);
+
     // 1. Setup Socket Event Listeners
     const handleJoinSuccess = ({ players: incomingPlayers, settings, isHost: hostStatus }) => {
       setPlayers(incomingPlayers || []);
@@ -101,14 +104,8 @@ function Game({ socket }) {
 
     socket.on('join_success', handleJoinSuccess);
     socket.on('room_created', handleJoinSuccess);
-
-    socket.on('connect', () => {
-      setIsConnected(true);
-    });
-
-    socket.on('disconnect', () => {
-      setIsConnected(false);
-    });
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
 
     socket.on('player_joined', ({ player, players: incomingPlayers }) => {
       setPlayers(incomingPlayers || []);
@@ -172,6 +169,7 @@ function Game({ socket }) {
     socket.on('word_chosen', ({ word }) => {
       setSecretWord(word);
       setWordChoices([]);
+      setGamePhase('DRAWING');
     });
 
     socket.on('game_state', ({ status, phase, round, maxRounds, drawerId, drawerName, wordHint, timeLeft }) => {
@@ -209,7 +207,7 @@ function Game({ socket }) {
 
     socket.on('game_reset', ({ players, settings }) => {
       setGamePhase('WAITING');
-      setPlayers(players);
+      setPlayers(players || []);
       setGameOverData(null);
       setRoundEndData(null);
       setWordChoices([]);
@@ -228,7 +226,7 @@ function Game({ socket }) {
       setTimeout(() => setErrorMessage(''), 4000);
     });
 
-    // 2. Emit join or create room with reconnect guarantee
+    // 2. Emit join or create room
     const sendJoin = () => {
       if (isCreator && initialSettings) {
         socket.emit('create_room', {
@@ -252,12 +250,12 @@ function Game({ socket }) {
     if (socket.connected) {
       sendJoin();
     }
-    socket.on('connect', sendJoin);
 
     return () => {
-      socket.off('connect', sendJoin);
-      socket.off('join_success');
-      socket.off('room_created');
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('join_success', handleJoinSuccess);
+      socket.off('room_created', handleJoinSuccess);
       socket.off('player_joined');
       socket.off('player_left');
       socket.off('update_players');
@@ -308,14 +306,38 @@ function Game({ socket }) {
     socket.emit('get_round_replay');
   };
 
+  // Safe clipboard helper for HTTP / LAN IP connections
   const copyInviteLink = () => {
     const inviteUrl = `${window.location.origin}/game/${roomId}`;
-    navigator.clipboard.writeText(inviteUrl).then(() => {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    }).catch(() => {
-      setCopiedLink(true);
-    });
+
+    const fallbackCopy = (text) => {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-9999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 2500);
+      } catch (err) {
+        console.error('Copy fallback failed:', err);
+      }
+      document.body.removeChild(textArea);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(inviteUrl)
+        .then(() => {
+          setCopiedLink(true);
+          setTimeout(() => setCopiedLink(false), 2500);
+        })
+        .catch(() => fallbackCopy(inviteUrl));
+    } else {
+      fallbackCopy(inviteUrl);
+    }
   };
 
   return (
@@ -451,7 +473,7 @@ function Game({ socket }) {
                       className="start-game-btn" 
                       onClick={handleStartGame}
                     >
-                      {players.length > 1 ? `▶️ Start Game (${players.length} Players)` : '▶️ Start Game (Solo Practice)'}
+                      ▶️ Start Game ({players.length} Player{players.length !== 1 ? 's' : ''})
                     </button>
                     <button
                       type="button"
@@ -473,7 +495,7 @@ function Game({ socket }) {
                       className="claim-host-btn"
                       onClick={handleStartGame}
                     >
-                      Start Game Anyway
+                      Start Game
                     </button>
                   </div>
                 )}

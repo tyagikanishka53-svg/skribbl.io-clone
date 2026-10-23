@@ -1,35 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Avatar from './Avatar';
 
 function Leaderboard({ players = [], currentDrawerId, isHost, currentUserId, socket }) {
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+
+  // Close moderation menu when clicking anywhere outside
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.player-card')) {
+        setSelectedPlayer(null);
+      }
+    };
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, []);
 
   // Sort descending by score
   const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
 
   const handleKick = (targetId) => {
     if (window.confirm('Are you sure you want to kick this player?')) {
-      socket.emit('kick_player', { targetId });
+      socket?.emit('kick_player', { targetId });
       setSelectedPlayer(null);
     }
   };
 
   const handleBan = (targetId) => {
     if (window.confirm('Are you sure you want to BAN this player from this room?')) {
-      socket.emit('ban_player', { targetId });
+      socket?.emit('ban_player', { targetId });
       setSelectedPlayer(null);
     }
   };
 
   const handleVoteKick = (targetId) => {
-    socket.emit('vote_kick', { targetId });
+    socket?.emit('vote_kick', { targetId });
     setSelectedPlayer(null);
   };
 
   const handleReport = (targetId) => {
     const reason = prompt('Reason for reporting this player:', 'Inappropriate behavior');
     if (reason) {
-      socket.emit('report_player', { targetId, reason });
+      socket?.emit('report_player', { targetId, reason });
       setSelectedPlayer(null);
     }
   };

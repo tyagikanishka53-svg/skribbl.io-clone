@@ -10,46 +10,42 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
   };
 
   useEffect(() => {
-    // 1. Listen for standard receive_message
-    const handleReceiveMessage = (data) => {
-      setMessageList((list) => [...list, data]);
+    // Unified message handler with strict deduplication
+    const handleIncomingMessage = (data) => {
+      if (!data) return;
+
+      const author = data.author || data.playerName || 'System';
+      const text = data.message || data.text || '';
+      const isSystem = data.isSystem || data.playerId === 'system' || author === 'System';
+
+      if (!text) return;
+
+      setMessageList((prevList) => {
+        const last = prevList[prevList.length - 1];
+        // Deduplicate if identical to the previous message
+        if (last && last.author === author && last.message === text) {
+          return prevList;
+        }
+        return [
+          ...prevList,
+          {
+            author,
+            message: text,
+            isSystem,
+            isCorrectGuess: data.isCorrectGuess || data.correct,
+            isClose: data.isClose,
+            alreadyGuessed: data.alreadyGuessed,
+          },
+        ];
+      });
     };
 
-    // 2. Listen for PDF spec event: chat_message { playerId, playerName, text }
-    const handleChatMessage = (data) => {
-      // Avoid duplicate display if already handled via receive_message
-      // Only add if not duplicate
-      if (data && data.text) {
-        setMessageList((list) => {
-          const last = list[list.length - 1];
-          if (last && last.author === data.playerName && last.message === data.text) {
-            return list;
-          }
-          return [...list, {
-            author: data.playerName,
-            message: data.text,
-            isSystem: data.playerId === 'system',
-            alreadyGuessed: data.alreadyGuessed
-          }];
-        });
-      }
-    };
-
-    // 3. Listen for PDF spec event: guess_result { correct, playerId, playerName, points }
-    const handleGuessResult = (data) => {
-      if (data && data.correct) {
-        // Shown via system message
-      }
-    };
-
-    socket.on('receive_message', handleReceiveMessage);
-    socket.on('chat_message', handleChatMessage);
-    socket.on('guess_result', handleGuessResult);
+    socket.on('receive_message', handleIncomingMessage);
+    socket.on('chat_message', handleIncomingMessage);
 
     return () => {
-      socket.off('receive_message', handleReceiveMessage);
-      socket.off('chat_message', handleChatMessage);
-      socket.off('guess_result', handleGuessResult);
+      socket.off('receive_message', handleIncomingMessage);
+      socket.off('chat_message', handleIncomingMessage);
     };
   }, [socket]);
 
@@ -62,32 +58,31 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
     const trimmed = currentMessage.trim();
     if (!trimmed) return;
 
-    // Emit PDF spec events: guess or chat
+    // Emit 'guess' when guessing active word, otherwise emit standard 'chat'
     if (gameStatus === 'DRAWING' && !isDrawer && !hasGuessed) {
-      socket.emit('guess', { text: trimmed });
+      socket.emit('guess', { roomId, text: trimmed, author: username });
     } else {
-      socket.emit('chat', { text: trimmed });
+      socket.emit('chat', { roomId, text: trimmed, author: username });
     }
 
-    // Also emit backward-compatible send_message
-    const messageData = {
+    // Single backward-compatible emission
+    socket.emit('send_message', {
       roomId,
       author: username,
       message: trimmed,
       text: trimmed,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    socket.emit('send_message', messageData);
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
 
     setCurrentMessage('');
   };
 
   const isDrawingTurn = isDrawer && gameStatus === 'DRAWING';
-  let inputPlaceholder = "Type your guess here...";
+  let inputPlaceholder = 'Type your guess here...';
   if (isDrawingTurn) {
-    inputPlaceholder = "You are drawing! Chat with others...";
+    inputPlaceholder = 'You are drawing! Chat with others...';
   } else if (hasGuessed && gameStatus === 'DRAWING') {
-    inputPlaceholder = "You guessed it! Chat with others who guessed...";
+    inputPlaceholder = 'You guessed it! Chat with others who guessed...';
   }
 
   return (
@@ -114,7 +109,10 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
           const guessedClass = msg.alreadyGuessed ? 'guessed-chat' : '';
 
           return (
-            <div key={index} className={`message user-message ${guessedClass} ${isSelf ? 'self-msg' : ''}`}>
+            <div
+              key={index}
+              className={`message user-message ${guessedClass} ${isSelf ? 'self-msg' : ''}`}
+            >
               <strong className="msg-author">{msg.author}: </strong>
               <span className="msg-content">{msg.message}</span>
             </div>

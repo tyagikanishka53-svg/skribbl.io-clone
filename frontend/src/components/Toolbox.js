@@ -17,16 +17,16 @@ const BRUSH_SIZES = [
 ];
 
 function Toolbox({ 
-  color, 
-  setColor, 
-  brushSize, 
-  setBrushSize, 
-  clearCanvas, 
+  color = '#000000', 
+  setColor = () => {}, 
+  brushSize = 7, 
+  setBrushSize = () => {}, 
+  clearCanvas = () => {}, 
   activeTool = 'brush',
   setActiveTool,
-  isEraser, 
+  isEraser = false, 
   setIsEraser,
-  undoLastStroke 
+  undoLastStroke = () => {}
 }) {
   const currentTool = activeTool || (isEraser ? 'eraser' : 'brush');
 
@@ -36,6 +36,20 @@ function Toolbox({
     }
     if (setIsEraser) {
       setIsEraser(tool === 'eraser');
+    }
+  };
+
+  const handleColorSelect = (selectedColor) => {
+    setColor(selectedColor);
+    if (currentTool === 'eraser') {
+      setTool('brush');
+    }
+  };
+
+  const handleSizeSelect = (size) => {
+    setBrushSize(size);
+    if (currentTool === 'fill') {
+      setTool('brush');
     }
   };
 
@@ -79,13 +93,9 @@ function Toolbox({
             type="button"
             className={`color-btn ${color === c && currentTool !== 'eraser' ? 'active-color' : ''}`}
             style={{ backgroundColor: c }}
-            onClick={() => {
-              setColor(c);
-              if (currentTool === 'eraser') {
-                setTool('brush');
-              }
-            }}
-            title={c}
+            onClick={() => handleColorSelect(c)}
+            title={`Select Color ${c}`}
+            aria-label={`Select Color ${c}`}
           />
         ))}
       </div>
@@ -97,14 +107,18 @@ function Toolbox({
             key={size}
             type="button"
             className={`brush-size-btn ${brushSize === size && currentTool !== 'fill' ? 'active' : ''}`}
-            onClick={() => {
-              setBrushSize(size);
-            }}
+            onClick={() => handleSizeSelect(size)}
             title={`${label} (${size}px)`}
+            aria-label={`${label} brush size (${size}px)`}
           >
             <span 
               className="brush-preview-dot" 
-              style={{ width: Math.min(24, Math.max(6, size)), height: Math.min(24, Math.max(6, size)) }} 
+              style={{ 
+                width: Math.min(24, Math.max(6, size)), 
+                height: Math.min(24, Math.max(6, size)),
+                backgroundColor: currentTool === 'eraser' ? '#ffffff' : color,
+                border: currentTool === 'eraser' || color.toLowerCase() === '#ffffff' ? '1px solid #ccc' : 'none'
+              }} 
             />
           </button>
         ))}

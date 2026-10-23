@@ -13,7 +13,7 @@ function floodFill(ctx, startX, startY, fillHex, width = 800, height = 500) {
   // parse hex to rgba
   let hex = (fillHex || '#000000').replace('#', '');
   if (hex.length === 3) {
-    hex = hex.split('').map(c => c + c).join('');
+    hex = hex.split('').map((c) => c + c).join('');
   }
   const fillR = parseInt(hex.substring(0, 2), 16) || 0;
   const fillG = parseInt(hex.substring(2, 4), 16) || 0;
@@ -63,7 +63,7 @@ function floodFill(ctx, startX, startY, fillHex, width = 800, height = 500) {
       [cx + 1, cy],
       [cx - 1, cy],
       [cx, cy + 1],
-      [cx, cy - 1]
+      [cx, cy - 1],
     ];
 
     for (let i = 0; i < 4; i++) {
@@ -118,7 +118,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       if (!stroke.points || stroke.points.length === 0) return;
 
       ctx.beginPath();
-      ctx.strokeStyle = stroke.isEraser ? '#ffffff' : (stroke.color || '#000000');
+      ctx.strokeStyle = stroke.isEraser ? '#ffffff' : stroke.color || '#000000';
       ctx.lineWidth = stroke.size || 5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -173,7 +173,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
         return;
       }
 
-      ctx.strokeStyle = stroke.isEraser ? '#ffffff' : (stroke.color || '#000000');
+      ctx.strokeStyle = stroke.isEraser ? '#ffffff' : stroke.color || '#000000';
       ctx.lineWidth = stroke.size || 5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
@@ -216,6 +216,8 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     // Initialize with white background
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!socket) return;
 
     // Socket listeners for incoming drawing data from other players
     const handleDrawStart = (data) => {
@@ -321,7 +323,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
 
     return {
       x: (clientX - rect.left) * scaleX,
-      y: (clientY - rect.top) * scaleY
+      y: (clientY - rect.top) * scaleY,
     };
   };
 
@@ -334,19 +336,23 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       const ctx = contextRef.current;
       if (canvas && ctx) {
         floodFill(ctx, x, y, color, canvas.width, canvas.height);
-        socket.emit('draw_fill', { roomId, x, y, color });
+        socket?.emit('draw_fill', { roomId, x, y, color });
       }
     }
   };
 
   const startDrawing = (e) => {
-    if (!isDrawer || !canDraw) return;
+    if (!isDrawer || !canDraw || !contextRef.current) return;
+
+    // Prevent scrolling gestures on touch screens
+    if (e.type === 'touchstart') {
+      e.preventDefault();
+    }
+
     if (activeTool === 'fill') {
       handleCanvasClick(e);
       return;
     }
-
-    if (e.type === 'touchstart') e.preventDefault();
 
     const { x, y } = getCanvasCoords(e);
     const isEraser = activeTool === 'eraser';
@@ -360,18 +366,18 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     isDrawingRef.current = true;
 
     // Send draw_start event
-    socket.emit('draw_start', {
+    socket?.emit('draw_start', {
       roomId,
       x,
       y,
       color: activeColor,
       size: brushSize,
-      isEraser
+      isEraser,
     });
   };
 
   const draw = (e) => {
-    if (!isDrawingRef.current || !isDrawer || !canDraw || activeTool === 'fill') return;
+    if (!isDrawingRef.current || !isDrawer || !canDraw || !contextRef.current || activeTool === 'fill') return;
     if (e.type === 'touchmove') e.preventDefault();
 
     const { x, y } = getCanvasCoords(e);
@@ -379,19 +385,19 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     contextRef.current.lineTo(x, y);
     contextRef.current.stroke();
 
-    socket.emit('draw_move', {
+    socket?.emit('draw_move', {
       roomId,
       x,
-      y
+      y,
     });
   };
 
   const finishDrawing = () => {
-    if (!isDrawingRef.current) return;
+    if (!isDrawingRef.current || !contextRef.current) return;
     isDrawingRef.current = false;
     contextRef.current.closePath();
 
-    socket.emit('draw_end', { roomId });
+    socket?.emit('draw_end', { roomId });
   };
 
   const clearCanvas = () => {
@@ -401,13 +407,13 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       contextRef.current.fillStyle = '#ffffff';
       contextRef.current.fillRect(0, 0, canvas.width, canvas.height);
     }
-    socket.emit('canvas_clear', { roomId });
-    socket.emit('clear_canvas', { roomId });
+    socket?.emit('canvas_clear', { roomId });
+    socket?.emit('clear_canvas', { roomId });
   };
 
   const undoLastStroke = () => {
     if (!isDrawer || !canDraw) return;
-    socket.emit('draw_undo', { roomId });
+    socket?.emit('draw_undo', { roomId });
   };
 
   return (
@@ -415,6 +421,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       <div className="canvas-frame">
         <canvas
           ref={canvasRef}
+          style={{ touchAction: 'none' }}
           className={`skribbl-canvas ${isDrawer && canDraw ? 'drawer-active' : 'spectator'} ${activeTool === 'fill' ? 'cursor-fill' : ''}`}
           onMouseDown={startDrawing}
           onMouseMove={draw}
