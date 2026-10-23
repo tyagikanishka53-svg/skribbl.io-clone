@@ -92,14 +92,22 @@ io.on('connection', (socket) => {
       room.updateSettings(settings);
     }
 
-    const player = new Player({
-      id: socket.id,
-      username: hostName || 'Host',
-      avatar,
-      isHost: true
-    });
+    let player = room.players.get(socket.id);
+    if (!player) {
+      player = new Player({
+        id: socket.id,
+        username: (hostName || 'Host').trim(),
+        avatar,
+        isHost: true
+      });
+      room.addPlayer(player);
+    } else {
+      player.username = (hostName || player.username).trim();
+      if (avatar) player.avatar = avatar;
+      player.isHost = true;
+      room.hostId = socket.id;
+    }
 
-    room.addPlayer(player);
     socket.join(targetRoomId);
     socketRoomMap.set(socket.id, targetRoomId);
 
@@ -121,99 +129,113 @@ io.on('connection', (socket) => {
       isHost: true
     });
 
-    // PDF spec event: player_joined { player, players }
+    // Broadcast new player to all room members
     room.broadcast('player_joined', {
       player: player.toJSON(),
       players: playersList
     });
     room.broadcast('update_players', playersList);
 
-    console.log(`[Room Created] Room: ${targetRoomId} by ${player.username}`);
+    console.log(`[Room Created] Room: ${targetRoomId} by ${player.username} (${socket.id})`);
   });
 
   // 2. Join Room (PDF: join_room { roomId, playerName })
   socket.on('join_room', ({ roomId, username, playerName, avatar = null, isSpectator = false }) => {
-    const finalName = username || playerName || 'Player';
+    let rawName = (username || playerName || 'Player').trim();
     const targetRoomId = (roomId || '').trim().toUpperCase();
 
     let room = rooms.get(targetRoomId);
-
-    // If room does not exist, auto-create room with this code for convenience
     if (!room) {
       room = new Room({ id: targetRoomId, isPrivate: false, settings: {}, io });
       rooms.set(targetRoomId, room);
       console.log(`[Auto-created Room] ${targetRoomId}`);
     }
 
-    // Check if player already in room by socket ID or by username (reconnect / page refresh)
-    let existingPlayer = null;
-    for (const [sId, p] of room.players.entries()) {
-      if (sId === socket.id || p.username.toLowerCase() === finalName.toLowerCase()) {
-        existingPlayer = p;
-        if (sId !== socket.id) {
-          room.players.delete(sId);
-          existingPlayer.id = socket.id;
-          room.players.set(socket.id, existingPlayer);
-          if (room.hostId === sId) {
-            room.hostId = socket.id;
-            existingPlayer.isHost = true;
-          }
-          if (room.game.currentDrawerId === sId) {
-            room.game.currentDrawerId = socket.id;
-          }
-          const orderIdx = room.game.drawerOrder.indexOf(sId);
-          if (orderIdx !== -1) {
-            room.game.drawerOrder[orderIdx] = socket.id;
-          }
-        }
-        break;
-      }
-    }
+    let player = room.players.get(socket.id);
 
-    if (existingPlayer) {
-      existingPlayer.username = finalName;
-      if (avatar) existingPlayer.avatar = avatar;
-      if (isSpectator !== undefined) existingPlayer.isSpectator = isSpectator;
+    if (player) {
+      // Same socket is re-joining or updating details
+      player.username = rawName;
+      if (avatar) player.avatar = avatar;
+      if (isSpectator !== undefined) player.isSpectator = isSpectator;
     } else {
+      // New socket joining the room!
+      // If another player in the room already has this username, append a counter (e.g. kannu (2))
+      const existingNames = new Set();
+      room.players.forEach(p => {
+        if (p.id !== socket.id) {
+          existingNames.add(p.username.toLowerCase());
+        }
+      });
+
+      let finalName = rawName;
+      if (existingNames.has(finalName.toLowerCase())) {
+        let count = 2;
+        while (existingNames.has(`${finalName} (${count})`.toLowerCase())) {
+          count++;
+        }
+        finalName = `${finalName} (${count})`;
+      }
+
       const isFirst = room.players.size === 0;
-      const newPlayer = new Player({
+      player = new Player({
         id: socket.id,
         username: finalName,
         avatar,
         isHost: isFirst
       });
-      if (isSpectator) newPlayer.isSpectator = true;
+      if (isSpectator) player.isSpectator = true;
 
-      const addResult = room.addPlayer(newPlayer);
+      const addResult = room.addPlayer(player);
       if (!addResult.success) {
         socket.emit('error_message', { message: addResult.reason || 'Could not join room' });
         return;
       }
+
+      console.log(`[Player Joined] ${finalName} (${socket.id}) -> Room ${targetRoomId} (Total: ${room.players.size})`);
     }
 
     socket.join(targetRoomId);
     socketRoomMap.set(socket.id, targetRoomId);
 
-    const currentPlayer = room.players.get(socket.id);
     const playersList = room.getPlayersList();
 
     // Confirm to joining client
     socket.emit('join_success', {
       roomId: targetRoomId,
-      player: currentPlayer.toJSON(),
+      player: player.toJSON(),
       players: playersList,
       settings: room.settings,
-      isHost: currentPlayer.isHost
+      isHost: player.isHost
     });
 
-    // Broadcast new player to all room members if new join
-    if (!existingPlayer) {
-      room.broadcast('player_joined', {
-        player: currentPlayer.toJSON(),
-        players: playersList
+    // Broadcast new player and updated player list to EVERYONE in the room
+    room.broadcast('player_joined', {
+      player: player.toJSON(),
+      players: playersList
+    });
+    room.broadcast('update_players', playersList);
+
+    // If game in progress, sync current state and canvas
+    if (room.game.status !== 'WAITING') {
+      const isDrawer = room.game.currentDrawerId === socket.id;
+      socket.emit('game_state', {
+        phase: room.game.status,
+        status: room.game.status,
+        round: room.game.currentRound,
+        maxRounds: room.game.maxRounds,
+        drawerId: room.game.currentDrawerId,
+        drawerName: room.players.get(room.game.currentDrawerId)?.username || '',
+        wordHint: isDrawer ? room.game.currentWord : formatHint(room.game.currentWord, room.game.revealedIndices, room.game.wordMode),
+        word: isDrawer ? room.game.currentWord : formatHint(room.game.currentWord, room.game.revealedIndices, room.game.wordMode),
+        hints: room.game.revealedIndices.size,
+        timeLeft: room.game.timeLeft
+      });
+
+      socket.emit('canvas_sync', {
+        strokes: room.game.strokes
       });
     }
-    room.broadcast('update_players', playersList);
 
     // If game in progress, sync current state and canvas
     if (room.game.status !== 'WAITING') {

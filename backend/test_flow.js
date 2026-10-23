@@ -223,15 +223,15 @@ async function runTests() {
     });
   });
 
-  await new Promise(res => server.listen(5098, res));
-  console.log('  Test Server listening on port 5098');
+  await new Promise(res => server.listen(5097, res));
+  console.log('  Test Server listening on port 5097');
 
   // Client 1 (Host - Alice)
-  const client1 = ioClient.connect('http://localhost:5098', { transports: ['websocket'] });
+  const client1 = ioClient.connect('http://localhost:5097', { transports: ['websocket'] });
   // Client 2 (Guesser - Bob)
-  const client2 = ioClient.connect('http://localhost:5098', { transports: ['websocket'] });
+  const client2 = ioClient.connect('http://localhost:5097', { transports: ['websocket'] });
   // Client 3 (Spectator - Charlie)
-  const client3 = ioClient.connect('http://localhost:5098', { transports: ['websocket'] });
+  const client3 = ioClient.connect('http://localhost:5097', { transports: ['websocket'] });
 
   await new Promise(res => client1.on('connect', res));
   await new Promise(res => client2.on('connect', res));

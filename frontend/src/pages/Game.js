@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { useParams, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import Canvas from '../components/Canvas';
 import Chat from '../components/Chat';
 import Leaderboard from '../components/Leaderboard';
@@ -9,9 +9,12 @@ function Game({ socket }) {
   const { roomId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const queryName = searchParams.get('name');
 
-  // Retrieve user credentials from navigation state or defaults
+  // Retrieve user credentials from navigation state, query param, or defaults
   const [username] = useState(
+    queryName ||
     location.state?.username || 
     localStorage.getItem('skribbl_username') || 
     `Player${Math.floor(1000 + Math.random() * 9000)}`
@@ -19,9 +22,9 @@ function Game({ socket }) {
 
   const [avatar] = useState(
     location.state?.avatar || {
-      color: '#3498db',
-      eyes: 0,
-      mouth: 0
+      color: ['#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#3498db'][Math.floor(Math.random() * 7)],
+      eyes: Math.floor(Math.random() * 4),
+      mouth: Math.floor(Math.random() * 4)
     }
   );
 
@@ -448,12 +451,15 @@ function Game({ socket }) {
                       className="start-game-btn" 
                       onClick={handleStartGame}
                     >
-                      {players.length <= 1 ? '▶️ Start Game (Solo Practice)' : '▶️ Start Game'}
+                      {players.length > 1 ? `▶️ Start Game (${players.length} Players)` : '▶️ Start Game (Solo Practice)'}
                     </button>
                     <button
                       type="button"
                       className="open-tab-btn"
-                      onClick={() => window.open(`/game/${roomId}`, '_blank')}
+                      onClick={() => {
+                        const guestNum = Math.floor(100 + Math.random() * 900);
+                        window.open(`/game/${roomId}?name=Guest_${guestNum}`, '_blank');
+                      }}
                       title="Open a 2nd player window to test multiplayer guessing"
                     >
                       👥 Open 2nd Player Window
