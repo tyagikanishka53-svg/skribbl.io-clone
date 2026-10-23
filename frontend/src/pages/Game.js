@@ -1,0 +1,522 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import Canvas from '../components/Canvas';
+import Chat from '../components/Chat';
+import Leaderboard from '../components/Leaderboard';
+import Avatar from '../components/Avatar';
+
+function Game({ socket }) {
+  const { roomId } = useParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Retrieve user credentials from navigation state or defaults
+  const [username] = useState(
+    location.state?.username || 
+    localStorage.getItem('skribbl_username') || 
+    `Player${Math.floor(1000 + Math.random() * 9000)}`
+  );
+
+  const [avatar] = useState(
+    location.state?.avatar || {
+      color: '#3498db',
+      eyes: 0,
+      mouth: 0
+    }
+  );
+
+  const initialSettings = location.state?.initialSettings || null;
+  const isCreator = location.state?.isCreator || false;
+
+  // Game & Room state
+  const [players, setPlayers] = useState([]);
+  const [isHost, setIsHost] = useState(false);
+  const [roomSettings, setRoomSettings] = useState({
+    rounds: 3,
+    drawTime: 60,
+    maxPlayers: 8,
+    hints: 2,
+    wordCategory: 'all',
+    wordMode: 'normal'
+  });
+
+  const [gamePhase, setGamePhase] = useState('WAITING'); // WAITING | CHOOSING | DRAWING | ROUND_END | GAME_OVER
+  const [currentRound, setCurrentRound] = useState(1);
+  const [maxRounds, setMaxRounds] = useState(3);
+  const [timeLeft, setTimeLeft] = useState(60);
+
+  // Turn data
+  const [drawerId, setDrawerId] = useState('');
+  const [drawerName, setDrawerName] = useState('');
+  const [wordChoices, setWordChoices] = useState([]);
+  const [chooseTime, setChooseTime] = useState(15);
+  const [secretWord, setSecretWord] = useState('');
+  const [wordHint, setWordHint] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  // Round End & Game Over modals
+  const [roundEndData, setRoundEndData] = useState(null);
+  const [gameOverData, setGameOverData] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const [isConnected, setIsConnected] = useState(socket.connected);
+
+  const currentUserId = socket.id;
+  const isMyTurn = socket.id === drawerId;
+  const myPlayer = players.find(p => p.id === socket.id);
+  const hasGuessed = !!myPlayer?.hasGuessed;
+
+  // Fallback so the user always sees their own profile even before initial socket roundtrip
+  const displayPlayers = players.length > 0 ? players : [
+    {
+      id: socket.id || 'me',
+      username,
+      avatar,
+      score: 0,
+      roundScore: 0,
+      hasGuessed: false,
+      isHost: isHost || isCreator || true,
+      isReady: true
+    }
+  ];
+
+  useEffect(() => {
+    // 1. Setup Socket Event Listeners
+    const handleJoinSuccess = ({ players: incomingPlayers, settings, isHost: hostStatus }) => {
+      setPlayers(incomingPlayers || []);
+      setIsConnected(true);
+      const me = (incomingPlayers || []).find(p => p.id === socket.id);
+      setIsHost(hostStatus !== undefined ? hostStatus : (me?.isHost || incomingPlayers?.length === 1));
+      if (settings) setRoomSettings(settings);
+    };
+
+    socket.on('join_success', handleJoinSuccess);
+    socket.on('room_created', handleJoinSuccess);
+
+    socket.on('connect', () => {
+      setIsConnected(true);
+    });
+
+    socket.on('disconnect', () => {
+      setIsConnected(false);
+    });
+
+    socket.on('player_joined', ({ player, players: incomingPlayers }) => {
+      setPlayers(incomingPlayers || []);
+      const me = (incomingPlayers || []).find(p => p.id === socket.id);
+      if (me?.isHost) setIsHost(true);
+      setStatusMessage(`${player.username} joined the room!`);
+      setTimeout(() => setStatusMessage(''), 3000);
+    });
+
+    socket.on('player_left', ({ playerName, players: incomingPlayers }) => {
+      setPlayers(incomingPlayers || []);
+      const me = (incomingPlayers || []).find(p => p.id === socket.id);
+      if (me?.isHost) setIsHost(true);
+      setStatusMessage(`${playerName} left the room.`);
+      setTimeout(() => setStatusMessage(''), 3000);
+    });
+
+    socket.on('update_players', (playerList) => {
+      setPlayers(playerList || []);
+      const me = (playerList || []).find(p => p.id === socket.id);
+      if (me?.isHost || playerList?.length === 1) setIsHost(true);
+    });
+
+    socket.on('host_changed', ({ hostId, hostName }) => {
+      setIsHost(socket.id === hostId);
+      setStatusMessage(`👑 ${hostName} is now the host!`);
+      setTimeout(() => setStatusMessage(''), 4000);
+    });
+
+    socket.on('settings_updated', (updatedSettings) => {
+      setRoomSettings(updatedSettings);
+    });
+
+    socket.on('round_start', ({ round, maxRounds, drawerId, drawerName, drawTime, status }) => {
+      setGamePhase('CHOOSING');
+      setCurrentRound(round);
+      setMaxRounds(maxRounds);
+      setDrawerId(drawerId);
+      setDrawerName(drawerName);
+      setTimeLeft(drawTime);
+      setSecretWord('');
+      setWordHint('');
+      setRoundEndData(null);
+      setStatusMessage(status || `${drawerName} is choosing a word...`);
+    });
+
+    socket.on('word_options', ({ words, timeLimit }) => {
+      setWordChoices(words);
+      setChooseTime(timeLimit || 15);
+    });
+
+    socket.on('choose_time_update', (time) => {
+      setChooseTime(time);
+    });
+
+    socket.on('word_chosen', ({ word }) => {
+      setSecretWord(word);
+      setWordChoices([]);
+    });
+
+    socket.on('game_state', ({ status, round, maxRounds, drawerId, drawerName, wordHint, timeLeft }) => {
+      setGamePhase(status);
+      if (round) setCurrentRound(round);
+      if (maxRounds) setMaxRounds(maxRounds);
+      if (drawerId) setDrawerId(drawerId);
+      if (drawerName) setDrawerName(drawerName);
+      if (wordHint !== undefined) setWordHint(wordHint);
+      if (timeLeft !== undefined) setTimeLeft(timeLeft);
+      setStatusMessage('');
+    });
+
+    socket.on('hint_update', ({ wordHint }) => {
+      setWordHint(wordHint);
+    });
+
+    socket.on('timer_update', (time) => {
+      setTimeLeft(time);
+    });
+
+    socket.on('round_end', (data) => {
+      setGamePhase('ROUND_END');
+      setRoundEndData(data);
+      setWordChoices([]);
+      if (data.players) setPlayers(data.players);
+    });
+
+    socket.on('game_over', (data) => {
+      setGamePhase('GAME_OVER');
+      setGameOverData(data);
+      setRoundEndData(null);
+    });
+
+    socket.on('game_reset', ({ players, settings }) => {
+      setGamePhase('WAITING');
+      setPlayers(players);
+      setGameOverData(null);
+      setRoundEndData(null);
+      setWordChoices([]);
+      setSecretWord('');
+      setWordHint('');
+      if (settings) setRoomSettings(settings);
+    });
+
+    socket.on('kicked_from_room', ({ reason }) => {
+      alert(reason || 'You have been kicked from the room.');
+      navigate('/');
+    });
+
+    socket.on('error_message', ({ message }) => {
+      setErrorMessage(message);
+      setTimeout(() => setErrorMessage(''), 4000);
+    });
+
+    // 2. Emit join or create room with reconnect guarantee
+    const sendJoin = () => {
+      if (isCreator && initialSettings) {
+        socket.emit('create_room', {
+          roomId,
+          hostName: username,
+          settings: initialSettings,
+          avatar,
+          isPrivate: initialSettings.isPrivate
+        });
+      } else {
+        socket.emit('join_room', {
+          roomId,
+          playerName: username,
+          username,
+          avatar
+        });
+      }
+    };
+
+    if (socket.connected) {
+      sendJoin();
+    }
+    socket.on('connect', sendJoin);
+
+    return () => {
+      socket.off('connect', sendJoin);
+      socket.off('join_success');
+      socket.off('room_created');
+      socket.off('player_joined');
+      socket.off('player_left');
+      socket.off('update_players');
+      socket.off('host_changed');
+      socket.off('settings_updated');
+      socket.off('round_start');
+      socket.off('word_options');
+      socket.off('choose_time_update');
+      socket.off('word_chosen');
+      socket.off('game_state');
+      socket.off('hint_update');
+      socket.off('timer_update');
+      socket.off('round_end');
+      socket.off('game_over');
+      socket.off('game_reset');
+      socket.off('kicked_from_room');
+      socket.off('error_message');
+    };
+  }, [socket, roomId, username, avatar, isCreator, initialSettings, navigate]);
+
+  // Actions
+  const handleStartGame = () => {
+    if (!socket.connected) {
+      socket.connect();
+    }
+    socket.emit('start_game', { roomId });
+  };
+
+  const handleSelectWord = (word) => {
+    socket.emit('select_word', { roomId, word });
+    setWordChoices([]);
+  };
+
+  const handlePlayAgain = () => {
+    socket.emit('play_again');
+  };
+
+  const copyInviteLink = () => {
+    const inviteUrl = `${window.location.origin}/game/${roomId}`;
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }).catch(() => {
+      setCopiedLink(true);
+    });
+  };
+
+  return (
+    <div className="game-screen-wrapper">
+      {/* Top Header Bar */}
+      <header className="game-navbar">
+        <div className="nav-brand" onClick={() => navigate('/')} title="Back to Lobby">
+          <span className="brand-logo">skribbl</span><span className="brand-dot">.io</span>
+        </div>
+
+        <div className="nav-room-info">
+          <span className="room-badge">Room: <strong>{roomId}</strong></span>
+          <button type="button" className="copy-link-btn" onClick={copyInviteLink}>
+            {copiedLink ? '✅ Link Copied!' : '📋 Copy Invite'}
+          </button>
+          {!isConnected && (
+            <span className="conn-status-pill offline" title="Reconnecting to server...">
+              🔴 Connecting...
+            </span>
+          )}
+        </div>
+
+        {gamePhase !== 'WAITING' && (
+          <div className="round-badge">
+            Round {currentRound} of {maxRounds}
+          </div>
+        )}
+
+        {/* Word Display / Hint */}
+        <div className="nav-word-hint">
+          {gamePhase === 'DRAWING' ? (
+            isMyTurn ? (
+              <div className="word-drawer-view">
+                <span className="word-label">DRAW THIS:</span>
+                <span className="word-secret">{secretWord.toUpperCase()}</span>
+              </div>
+            ) : (
+              <div className="word-guesser-view">
+                <span className="word-hint-text">{wordHint}</span>
+                <span className="word-length-hint">({wordHint.replace(/\s/g, '').length} letters)</span>
+              </div>
+            )
+          ) : (
+            <div className="phase-indicator-text">
+              {statusMessage || (gamePhase === 'CHOOSING' ? `${drawerName} is choosing...` : 'Waiting for round')}
+            </div>
+          )}
+        </div>
+
+        {/* Countdown Timer */}
+        <div className={`nav-timer ${timeLeft <= 15 && gamePhase === 'DRAWING' ? 'timer-urgent' : ''}`}>
+          <span className="timer-icon">⏱️</span>
+          <span className="timer-val">{timeLeft}s</span>
+        </div>
+      </header>
+
+      {/* Error or Notification Alert */}
+      {errorMessage && (
+        <div className="global-error-banner">
+          ⚠️ {errorMessage}
+        </div>
+      )}
+
+      {/* Main Game Arena */}
+      <div className="game-arena-grid">
+        <Leaderboard
+          players={displayPlayers}
+          currentDrawerId={drawerId}
+          isHost={isHost}
+          currentUserId={currentUserId}
+          socket={socket}
+        />
+
+        <div className="canvas-column">
+          {/* Waiting Room Overlay if game has not started */}
+          {gamePhase === 'WAITING' ? (
+            <div className="lobby-waiting-overlay">
+              <div className="waiting-card">
+                <h2>Game Lobby</h2>
+                <p className="waiting-subtitle">
+                  Share Room Code <strong>{roomId}</strong> with friends to join!
+                </p>
+
+                <div className="lobby-players-grid">
+                  {displayPlayers.map((p) => (
+                    <div key={p.id} className="lobby-player-bubble">
+                      <Avatar avatar={p.avatar} size={54} />
+                      <span className="lobby-player-name">
+                        {p.username} {p.isHost && '👑'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="lobby-settings-summary">
+                  <span>⏱️ Draw Time: <strong>{roomSettings.drawTime}s</strong></span>
+                  <span>🔄 Rounds: <strong>{roomSettings.rounds}</strong></span>
+                  <span>🔤 Category: <strong>{roomSettings.wordCategory}</strong></span>
+                  <span>💡 Hints: <strong>{roomSettings.hints}</strong></span>
+                </div>
+
+                {isHost || players.length <= 1 ? (
+                  <div className="lobby-actions-group">
+                    <button 
+                      type="button" 
+                      className="start-game-btn" 
+                      onClick={handleStartGame}
+                    >
+                      {players.length <= 1 ? '▶️ Start Game (Solo Practice)' : '▶️ Start Game'}
+                    </button>
+                    <button
+                      type="button"
+                      className="open-tab-btn"
+                      onClick={() => window.open(`/game/${roomId}`, '_blank')}
+                      title="Open a 2nd player window to test multiplayer guessing"
+                    >
+                      👥 Open 2nd Player Window
+                    </button>
+                  </div>
+                ) : (
+                  <div className="guest-actions-group">
+                    <p className="host-wait-msg">⏳ Waiting for room host to start the game...</p>
+                    <button
+                      type="button"
+                      className="claim-host-btn"
+                      onClick={handleStartGame}
+                    >
+                      Start Game Anyway
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <Canvas
+              socket={socket}
+              roomId={roomId}
+              isDrawer={isMyTurn}
+              canDraw={gamePhase === 'DRAWING'}
+            />
+          )}
+        </div>
+
+        <Chat
+          socket={socket}
+          roomId={roomId}
+          username={username}
+          isDrawer={isMyTurn}
+          hasGuessed={hasGuessed}
+          gameStatus={gamePhase}
+        />
+      </div>
+
+      {/* Word Selection Modal for Drawer */}
+      {isMyTurn && gamePhase === 'CHOOSING' && wordChoices.length > 0 && (
+        <div className="modal-overlay">
+          <div className="word-select-dialog">
+            <h3>Choose a Word to Draw</h3>
+            <p className="choose-timer-text">Auto-selecting in {chooseTime}s</p>
+            <div className="word-buttons-row">
+              {wordChoices.map((word) => (
+                <button
+                  key={word}
+                  type="button"
+                  className="word-choice-btn"
+                  onClick={() => handleSelectWord(word)}
+                >
+                  {word}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Round End Recap Modal */}
+      {gamePhase === 'ROUND_END' && roundEndData && (
+        <div className="round-end-overlay">
+          <div className="round-end-card">
+            <h2>Round Finished!</h2>
+            <p className="round-reason">{roundEndData.reason}</p>
+            <div className="revealed-word-box">
+              <span>The secret word was:</span>
+              <strong className="revealed-word">{roundEndData.word?.toUpperCase()}</strong>
+            </div>
+            <p className="next-round-countdown">Next turn starting soon...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Game Over / Victory Podium Modal */}
+      {gamePhase === 'GAME_OVER' && gameOverData && (
+        <div className="modal-overlay">
+          <div className="game-over-dialog">
+            <h1 className="game-over-title">🏆 Game Finished!</h1>
+            <p className="game-over-subtitle">
+              Winner: <strong>{gameOverData.winner?.username || 'No one'}</strong> with {gameOverData.winner?.score || 0} points!
+            </p>
+
+            <div className="podium-section">
+              {gameOverData.leaderboard?.slice(0, 3).map((player, idx) => (
+                <div key={player.id} className={`podium-card rank-${idx + 1}`}>
+                  <div className="podium-rank-icon">
+                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+                  </div>
+                  <Avatar avatar={player.avatar} size={48} />
+                  <span className="podium-name">{player.username}</span>
+                  <span className="podium-score">{player.score} pts</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="game-over-actions">
+              {isHost ? (
+                <button type="button" className="play-again-btn" onClick={handlePlayAgain}>
+                  🔄 Play Again
+                </button>
+              ) : (
+                <span className="waiting-host-again">Waiting for host to restart...</span>
+              )}
+              <button type="button" className="leave-game-btn" onClick={() => navigate('/')}>
+                🚪 Back to Lobby
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Game;

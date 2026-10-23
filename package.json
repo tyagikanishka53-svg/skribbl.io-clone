@@ -1,0 +1,15 @@
+{
+  "name": "skribbl-clone",
+  "version": "1.0.0",
+  "description": "Full-stack real-time multiplayer drawing and guessing game",
+  "main": "backend/index.js",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
+    "start": "node backend/index.js",
+    "test": "node backend/test_flow.js",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+  },
+  "keywords": ["skribbl", "websocket", "socket.io", "react", "canvas"],
+  "author": "",
+  "license": "ISC"
+}
