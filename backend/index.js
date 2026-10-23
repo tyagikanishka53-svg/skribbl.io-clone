@@ -6,6 +6,7 @@ const cors = require('cors');
 
 const Room = require('./utils/Room');
 const Player = require('./utils/Player');
+const { formatHint } = require('./utils/words');
 
 const app = express();
 app.use(cors());
@@ -73,7 +74,7 @@ io.on('connection', (socket) => {
     return rooms.get(roomId) || null;
   };
 
-  // 1. Create Room
+  // 1. Create Room (PDF: create_room { hostName, settings })
   socket.on('create_room', ({ roomId, hostName, settings = {}, avatar = null, isPrivate = false }) => {
     let targetRoomId = (roomId || '').trim().toUpperCase();
     if (!targetRoomId) {
@@ -120,6 +121,7 @@ io.on('connection', (socket) => {
       isHost: true
     });
 
+    // PDF spec event: player_joined { player, players }
     room.broadcast('player_joined', {
       player: player.toJSON(),
       players: playersList
@@ -129,8 +131,8 @@ io.on('connection', (socket) => {
     console.log(`[Room Created] Room: ${targetRoomId} by ${player.username}`);
   });
 
-  // 2. Join Room
-  socket.on('join_room', ({ roomId, username, playerName, avatar = null }) => {
+  // 2. Join Room (PDF: join_room { roomId, playerName })
+  socket.on('join_room', ({ roomId, username, playerName, avatar = null, isSpectator = false }) => {
     const finalName = username || playerName || 'Player';
     const targetRoomId = (roomId || '').trim().toUpperCase();
 
@@ -143,10 +145,35 @@ io.on('connection', (socket) => {
       console.log(`[Auto-created Room] ${targetRoomId}`);
     }
 
-    const existingPlayer = room.players.get(socket.id);
+    // Check if player already in room by socket ID or by username (reconnect / page refresh)
+    let existingPlayer = null;
+    for (const [sId, p] of room.players.entries()) {
+      if (sId === socket.id || p.username.toLowerCase() === finalName.toLowerCase()) {
+        existingPlayer = p;
+        if (sId !== socket.id) {
+          room.players.delete(sId);
+          existingPlayer.id = socket.id;
+          room.players.set(socket.id, existingPlayer);
+          if (room.hostId === sId) {
+            room.hostId = socket.id;
+            existingPlayer.isHost = true;
+          }
+          if (room.game.currentDrawerId === sId) {
+            room.game.currentDrawerId = socket.id;
+          }
+          const orderIdx = room.game.drawerOrder.indexOf(sId);
+          if (orderIdx !== -1) {
+            room.game.drawerOrder[orderIdx] = socket.id;
+          }
+        }
+        break;
+      }
+    }
+
     if (existingPlayer) {
       existingPlayer.username = finalName;
       if (avatar) existingPlayer.avatar = avatar;
+      if (isSpectator !== undefined) existingPlayer.isSpectator = isSpectator;
     } else {
       const isFirst = room.players.size === 0;
       const newPlayer = new Player({
@@ -155,6 +182,7 @@ io.on('connection', (socket) => {
         avatar,
         isHost: isFirst
       });
+      if (isSpectator) newPlayer.isSpectator = true;
 
       const addResult = room.addPlayer(newPlayer);
       if (!addResult.success) {
@@ -178,25 +206,28 @@ io.on('connection', (socket) => {
       isHost: currentPlayer.isHost
     });
 
-    // Broadcast new player to all room members
-    room.broadcast('player_joined', {
-      player: currentPlayer.toJSON(),
-      players: playersList
-    });
-
-    // Backward compatibility
+    // Broadcast new player to all room members if new join
+    if (!existingPlayer) {
+      room.broadcast('player_joined', {
+        player: currentPlayer.toJSON(),
+        players: playersList
+      });
+    }
     room.broadcast('update_players', playersList);
 
     // If game in progress, sync current state and canvas
     if (room.game.status !== 'WAITING') {
       const isDrawer = room.game.currentDrawerId === socket.id;
       socket.emit('game_state', {
+        phase: room.game.status,
         status: room.game.status,
         round: room.game.currentRound,
         maxRounds: room.game.maxRounds,
         drawerId: room.game.currentDrawerId,
         drawerName: room.players.get(room.game.currentDrawerId)?.username || '',
         wordHint: isDrawer ? room.game.currentWord : formatHint(room.game.currentWord, room.game.revealedIndices, room.game.wordMode),
+        word: isDrawer ? room.game.currentWord : formatHint(room.game.currentWord, room.game.revealedIndices, room.game.wordMode),
+        hints: room.game.revealedIndices.size,
         timeLeft: room.game.timeLeft
       });
 
@@ -207,6 +238,26 @@ io.on('connection', (socket) => {
     }
 
     console.log(`[Player Joined] ${finalName} -> Room ${targetRoomId}`);
+  });
+
+  // Ready-up toggle in lobby (PDF Page 1: "Lobby: Show players, ready-up, host starts game")
+  socket.on('toggle_ready', () => {
+    const room = getPlayerRoom();
+    if (!room) return;
+
+    room.toggleReady(socket.id);
+    const playersList = room.getPlayersList();
+    room.broadcast('update_players', playersList);
+  });
+
+  // Spectator mode toggle (PDF Page 7: "Spectator mode – Watch without playing")
+  socket.on('toggle_spectator', () => {
+    const room = getPlayerRoom();
+    if (!room) return;
+
+    room.toggleSpectator(socket.id);
+    const playersList = room.getPlayersList();
+    room.broadcast('update_players', playersList);
   });
 
   // 3. Get Public Rooms
@@ -231,11 +282,21 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Start Game (Host Only)
-  socket.on('start_game', ({ roomId }) => {
+  // 5. Start Game (PDF: start_game {} - Host Only)
+  socket.on('start_game', ({ roomId } = {}) => {
     const targetRoomId = roomId || socketRoomMap.get(socket.id);
     const room = rooms.get(targetRoomId);
-    if (!room) return;
+    if (!room) {
+      socket.emit('error_message', { message: 'Room not found. Please rejoin.' });
+      return;
+    }
+
+    // Auto-elect host if hostId is unset, disconnected, or if single player in room
+    if (!room.hostId || !room.players.has(room.hostId) || room.players.size === 1) {
+      room.hostId = socket.id;
+      const p = room.players.get(socket.id);
+      if (p) p.isHost = true;
+    }
 
     if (room.hostId !== socket.id) {
       socket.emit('error_message', { message: 'Only the room host can start the game.' });
@@ -255,22 +316,29 @@ io.on('connection', (socket) => {
     console.log(`[Game Started] Room ${targetRoomId}`);
   });
 
-  // 6. Word Selection
-  socket.on('select_word', ({ roomId, word }) => {
+  // 6. Word Selection (PDF: word_chosen { word }, alias: select_word)
+  const handleWordSelection = ({ roomId, word }) => {
     const targetRoomId = roomId || socketRoomMap.get(socket.id);
     const room = rooms.get(targetRoomId);
     if (!room) return;
 
     room.game.selectWord(socket.id, word);
-  });
+  };
+  socket.on('word_chosen', handleWordSelection);
+  socket.on('select_word', handleWordSelection);
 
   // 7. Drawing Events (Restricted to Drawer Only)
   socket.on('draw_start', (data) => {
     const room = getPlayerRoom();
     if (!room || room.game.currentDrawerId !== socket.id || room.game.status !== 'DRAWING') return;
 
-    room.game.startStroke(data);
+    const stroke = room.game.startStroke(data);
     room.broadcastExcept(socket.id, 'draw_start', data);
+
+    // Broadcast draw_data per PDF page 4
+    if (stroke) {
+      room.broadcast('draw_data', { type: 'start', strokeId: stroke.id, ...data });
+    }
   });
 
   socket.on('draw_move', (data) => {
@@ -279,6 +347,7 @@ io.on('connection', (socket) => {
 
     room.game.addPoint(data);
     room.broadcastExcept(socket.id, 'draw_move', data);
+    room.broadcast('draw_data', { type: 'move', ...data });
   });
 
   socket.on('draw_end', () => {
@@ -287,28 +356,41 @@ io.on('connection', (socket) => {
 
     room.game.endStroke();
     room.broadcastExcept(socket.id, 'draw_end');
+    room.broadcast('draw_data', { type: 'end' });
   });
 
-  // Backward compatibility: draw_data
+  // Flood fill / Bucket Tool
+  socket.on('draw_fill', (data) => {
+    const room = getPlayerRoom();
+    if (!room || room.game.currentDrawerId !== socket.id || room.game.status !== 'DRAWING') return;
+
+    const fillAction = room.game.addFill(data);
+    room.broadcast('draw_fill', data);
+    if (fillAction) {
+      room.broadcast('draw_data', { type: 'fill', ...data });
+    }
+  });
+
+  // draw_data fallback
   socket.on('draw_data', (data) => {
     const room = getPlayerRoom();
     if (!room || room.game.currentDrawerId !== socket.id) return;
 
-    if (data.isStarting) {
+    if (data.isStarting || data.type === 'start') {
       room.game.startStroke({
-        x: data.offsetX,
-        y: data.offsetY,
-        color: data.strokeColor,
-        size: data.strokeSize
+        x: data.x || data.offsetX,
+        y: data.y || data.offsetY,
+        color: data.color || data.strokeColor,
+        size: data.size || data.strokeSize
       });
-    } else {
-      room.game.addPoint({ x: data.offsetX, y: data.offsetY });
+    } else if (data.type === 'move') {
+      room.game.addPoint({ x: data.x || data.offsetX, y: data.y || data.offsetY });
     }
 
     room.broadcastExcept(socket.id, 'draw_data', data);
   });
 
-  // Undo Last Stroke
+  // Undo Last Stroke (PDF: draw_undo {})
   socket.on('draw_undo', () => {
     const room = getPlayerRoom();
     if (!room || room.game.currentDrawerId !== socket.id) return;
@@ -316,42 +398,52 @@ io.on('connection', (socket) => {
     const undone = room.game.undoStroke();
     if (undone) {
       room.broadcast('canvas_sync', { strokes: room.game.strokes });
+      room.broadcast('draw_undo');
     }
   });
 
-  // Clear Canvas
-  socket.on('clear_canvas', () => {
+  // Clear Canvas (PDF: canvas_clear {}, alias: clear_canvas)
+  const handleClearCanvas = () => {
     const room = getPlayerRoom();
     if (!room || room.game.currentDrawerId !== socket.id) return;
 
     room.game.clearCanvas();
+    room.broadcast('canvas_clear');
     room.broadcast('clear_canvas');
+  };
+  socket.on('canvas_clear', handleClearCanvas);
+  socket.on('clear_canvas', handleClearCanvas);
+
+  // Request Round Replay (PDF Page 7: Replay - Replay last round's drawing)
+  socket.on('get_round_replay', () => {
+    const room = getPlayerRoom();
+    if (!room) return;
+    socket.emit('round_replay', { strokes: room.game.lastRoundStrokes });
   });
 
   // 8. Chat & Guess Handling
-  socket.on('send_message', ({ roomId, author, message, text }) => {
-    const targetRoomId = roomId || socketRoomMap.get(socket.id);
-    const room = rooms.get(targetRoomId);
-    if (!room) return;
-
-    const player = room.players.get(socket.id);
-    if (!player) return;
-
-    const chatText = (text || message || '').trim();
+  // Common guess processor
+  const processGuessOrMessage = (room, player, text, author) => {
+    const chatText = (text || '').trim();
     if (!chatText) return;
 
     const playerName = player.username || author || 'Player';
 
     // Process guess during DRAWING phase
     if (room.game.status === 'DRAWING') {
-      // If player already guessed, their messages only go to players who also already guessed (no spoilers!)
+      // If player already guessed, their messages only go to players who also already guessed (anti-spoiler)
       if (player.hasGuessed) {
-        // Send to all players who guessed + drawer
         room.players.forEach(p => {
           if (p.hasGuessed || p.id === room.game.currentDrawerId) {
             io.to(p.id).emit('receive_message', {
               author: playerName,
               message: chatText,
+              alreadyGuessed: true
+            });
+            io.to(p.id).emit('chat_message', {
+              playerId: player.id,
+              playerName,
+              text: chatText,
               alreadyGuessed: true
             });
           }
@@ -362,7 +454,15 @@ io.on('connection', (socket) => {
       const guessRes = room.game.handleGuess(player, chatText);
 
       if (guessRes.isCorrect) {
-        // Broadcast success notification
+        // PDF spec event: guess_result { correct, playerId, playerName, points }
+        room.broadcast('guess_result', {
+          correct: true,
+          playerId: player.id,
+          playerName: player.username,
+          points: guessRes.points
+        });
+
+        // Broadcast success notification in chat
         room.broadcast('receive_message', {
           author: 'System',
           message: `🎉 ${playerName} guessed the word! (+${guessRes.points} pts)`,
@@ -370,12 +470,10 @@ io.on('connection', (socket) => {
           isCorrectGuess: true
         });
 
-        // Emit guess_result
-        room.broadcast('guess_result', {
-          correct: true,
-          playerId: player.id,
-          playerName: player.username,
-          points: guessRes.points
+        room.broadcast('chat_message', {
+          playerId: 'system',
+          playerName: 'System',
+          text: `🎉 ${playerName} guessed the word! (+${guessRes.points} pts)`
         });
 
         // Update player scoreboards
@@ -391,19 +489,61 @@ io.on('connection', (socket) => {
           isSystem: true,
           isClose: true
         });
+        socket.emit('guess_result', {
+          correct: false,
+          isClose: true,
+          playerId: player.id,
+          playerName: player.username,
+          points: 0
+        });
         return;
       }
     }
 
-    // Normal message broadcast
+    // Normal message broadcast (PDF: chat_message { playerId, playerName, text })
+    room.broadcast('chat_message', {
+      playerId: player.id,
+      playerName,
+      text: chatText
+    });
+
     room.broadcast('receive_message', {
       author: playerName,
       message: chatText,
       isSystem: false
     });
+  };
+
+  // PDF Page 5 Event: guess { text }
+  socket.on('guess', ({ text } = {}) => {
+    const room = getPlayerRoom();
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player) return;
+    processGuessOrMessage(room, player, text, player.username);
   });
 
-  // 9. Moderation: Kick & VoteKick
+  // PDF Page 5 Event: chat { text }
+  socket.on('chat', ({ text } = {}) => {
+    const room = getPlayerRoom();
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player) return;
+    processGuessOrMessage(room, player, text, player.username);
+  });
+
+  // Existing alias: send_message
+  socket.on('send_message', ({ roomId, author, message, text }) => {
+    const targetRoomId = roomId || socketRoomMap.get(socket.id);
+    const room = rooms.get(targetRoomId);
+    if (!room) return;
+    const player = room.players.get(socket.id);
+    if (!player) return;
+    processGuessOrMessage(room, player, text || message, author);
+  });
+
+  // 9. Moderation: Kick, Ban, VoteKick, Report
+  // Host Kick (PDF Page 5 & 6)
   socket.on('kick_player', ({ targetId }) => {
     const room = getPlayerRoom();
     if (!room || room.hostId !== socket.id) return;
@@ -423,6 +563,27 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Host Ban (PDF Page 5 & 7: "Kick/ban (host moderation)")
+  socket.on('ban_player', ({ targetId }) => {
+    const room = getPlayerRoom();
+    if (!room || room.hostId !== socket.id) return;
+
+    const bannedPlayer = room.players.get(targetId);
+    if (bannedPlayer) {
+      io.to(targetId).emit('kicked_from_room', { reason: 'You were banned from this room by the host.' });
+      room.banPlayer(targetId);
+      socketRoomMap.delete(targetId);
+
+      room.broadcast('receive_message', {
+        author: 'System',
+        message: `🚫 ${bannedPlayer.username} was banned by the host.`,
+        isSystem: true
+      });
+      room.broadcast('update_players', room.getPlayersList());
+    }
+  });
+
+  // Votekick (PDF Page 5 & 7)
   socket.on('vote_kick', ({ targetId }) => {
     const room = getPlayerRoom();
     if (!room) return;
@@ -451,6 +612,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Report Player (PDF Page 7: "Moderation - Kick, ban, votekick, report")
+  socket.on('report_player', ({ targetId, reason }) => {
+    const room = getPlayerRoom();
+    if (!room) return;
+
+    const success = room.reportPlayer(socket.id, targetId, reason);
+    if (success) {
+      socket.emit('receive_message', {
+        author: 'System',
+        message: '🚩 Thank you for your report. Moderation has been notified.',
+        isSystem: true
+      });
+    }
+  });
+
   // 10. Play Again (after Game Over)
   socket.on('play_again', () => {
     const room = getPlayerRoom();
@@ -461,6 +637,7 @@ io.on('connection', (socket) => {
       p.score = 0;
       p.roundScore = 0;
       p.hasGuessed = false;
+      p.isReady = p.isHost;
     });
 
     room.broadcast('game_reset', {
@@ -469,7 +646,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 11. Disconnect
+  // 11. Disconnect (PDF: player_left { playerId, players })
   socket.on('disconnect', () => {
     console.log(`[Socket Disconnected] ID: ${socket.id}`);
     const roomId = socketRoomMap.get(socket.id);
@@ -481,6 +658,7 @@ io.on('connection', (socket) => {
       socketRoomMap.delete(socket.id);
 
       if (removed) {
+        // PDF spec event: player_left { playerId, players }
         room.broadcast('player_left', {
           playerId: socket.id,
           playerName: removed.username,
@@ -504,8 +682,6 @@ io.on('connection', (socket) => {
     }
   });
 });
-
-const { formatHint } = require('./utils/words');
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {

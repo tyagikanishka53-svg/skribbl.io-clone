@@ -27,6 +27,7 @@ function Game({ socket }) {
 
   const initialSettings = location.state?.initialSettings || null;
   const isCreator = location.state?.isCreator || false;
+  const initialSpectator = location.state?.isSpectator || false;
 
   // Game & Room state
   const [players, setPlayers] = useState([]);
@@ -37,7 +38,8 @@ function Game({ socket }) {
     maxPlayers: 8,
     hints: 2,
     wordCategory: 'all',
-    wordMode: 'normal'
+    wordMode: 'normal',
+    language: 'en'
   });
 
   const [gamePhase, setGamePhase] = useState('WAITING'); // WAITING | CHOOSING | DRAWING | ROUND_END | GAME_OVER
@@ -66,6 +68,8 @@ function Game({ socket }) {
   const isMyTurn = socket.id === drawerId;
   const myPlayer = players.find(p => p.id === socket.id);
   const hasGuessed = !!myPlayer?.hasGuessed;
+  const isMyReady = !!myPlayer?.isReady;
+  const isMySpectator = !!myPlayer?.isSpectator;
 
   // Fallback so the user always sees their own profile even before initial socket roundtrip
   const displayPlayers = players.length > 0 ? players : [
@@ -77,7 +81,8 @@ function Game({ socket }) {
       roundScore: 0,
       hasGuessed: false,
       isHost: isHost || isCreator || true,
-      isReady: true
+      isReady: true,
+      isSpectator: initialSpectator
     }
   ];
 
@@ -134,17 +139,22 @@ function Game({ socket }) {
       setRoomSettings(updatedSettings);
     });
 
-    socket.on('round_start', ({ round, maxRounds, drawerId, drawerName, drawTime, status }) => {
+    socket.on('round_start', ({ round, maxRounds, drawerId, drawerName, drawTime, status, wordOptions }) => {
       setGamePhase('CHOOSING');
-      setCurrentRound(round);
-      setMaxRounds(maxRounds);
+      if (round) setCurrentRound(round);
+      if (maxRounds) setMaxRounds(maxRounds);
       setDrawerId(drawerId);
       setDrawerName(drawerName);
-      setTimeLeft(drawTime);
+      if (drawTime) setTimeLeft(drawTime);
       setSecretWord('');
       setWordHint('');
       setRoundEndData(null);
       setStatusMessage(status || `${drawerName} is choosing a word...`);
+
+      if (wordOptions && drawerId === socket.id) {
+        setWordChoices(wordOptions);
+        setChooseTime(15);
+      }
     });
 
     socket.on('word_options', ({ words, timeLimit }) => {
@@ -161,8 +171,9 @@ function Game({ socket }) {
       setWordChoices([]);
     });
 
-    socket.on('game_state', ({ status, round, maxRounds, drawerId, drawerName, wordHint, timeLeft }) => {
-      setGamePhase(status);
+    socket.on('game_state', ({ status, phase, round, maxRounds, drawerId, drawerName, wordHint, timeLeft }) => {
+      const activePhase = phase || status || 'WAITING';
+      setGamePhase(activePhase);
       if (round) setCurrentRound(round);
       if (maxRounds) setMaxRounds(maxRounds);
       if (drawerId) setDrawerId(drawerId);
@@ -205,7 +216,7 @@ function Game({ socket }) {
     });
 
     socket.on('kicked_from_room', ({ reason }) => {
-      alert(reason || 'You have been kicked from the room.');
+      alert(reason || 'You have been removed from the room.');
       navigate('/');
     });
 
@@ -229,7 +240,8 @@ function Game({ socket }) {
           roomId,
           playerName: username,
           username,
-          avatar
+          avatar,
+          isSpectator: initialSpectator
         });
       }
     };
@@ -261,7 +273,7 @@ function Game({ socket }) {
       socket.off('kicked_from_room');
       socket.off('error_message');
     };
-  }, [socket, roomId, username, avatar, isCreator, initialSettings, navigate]);
+  }, [socket, roomId, username, avatar, isCreator, initialSettings, initialSpectator, navigate]);
 
   // Actions
   const handleStartGame = () => {
@@ -271,13 +283,26 @@ function Game({ socket }) {
     socket.emit('start_game', { roomId });
   };
 
+  const handleToggleReady = () => {
+    socket.emit('toggle_ready');
+  };
+
+  const handleToggleSpectator = () => {
+    socket.emit('toggle_spectator');
+  };
+
   const handleSelectWord = (word) => {
+    socket.emit('word_chosen', { word, roomId });
     socket.emit('select_word', { roomId, word });
     setWordChoices([]);
   };
 
   const handlePlayAgain = () => {
     socket.emit('play_again');
+  };
+
+  const handleReplay = () => {
+    socket.emit('get_round_replay');
   };
 
   const copyInviteLink = () => {
@@ -327,7 +352,9 @@ function Game({ socket }) {
             ) : (
               <div className="word-guesser-view">
                 <span className="word-hint-text">{wordHint}</span>
-                <span className="word-length-hint">({wordHint.replace(/\s/g, '').length} letters)</span>
+                {roomSettings.wordMode !== 'hidden' && (
+                  <span className="word-length-hint">({wordHint.replace(/\s/g, '').length} letters)</span>
+                )}
               </div>
             )
           ) : (
@@ -373,10 +400,13 @@ function Game({ socket }) {
 
                 <div className="lobby-players-grid">
                   {displayPlayers.map((p) => (
-                    <div key={p.id} className="lobby-player-bubble">
+                    <div key={p.id} className={`lobby-player-bubble ${p.isReady ? 'ready-glow' : ''}`}>
                       <Avatar avatar={p.avatar} size={54} />
                       <span className="lobby-player-name">
-                        {p.username} {p.isHost && '👑'}
+                        {p.username} {p.isHost && '👑'} {p.isSpectator && '👁️'}
+                      </span>
+                      <span className={`ready-badge-pill ${p.isReady ? 'ready' : 'waiting'}`}>
+                        {p.isReady ? '✓ Ready' : '⏳ Waiting'}
                       </span>
                     </div>
                   ))}
@@ -386,7 +416,29 @@ function Game({ socket }) {
                   <span>⏱️ Draw Time: <strong>{roomSettings.drawTime}s</strong></span>
                   <span>🔄 Rounds: <strong>{roomSettings.rounds}</strong></span>
                   <span>🔤 Category: <strong>{roomSettings.wordCategory}</strong></span>
+                  <span>🌐 Lang: <strong>{(roomSettings.language || 'en').toUpperCase()}</strong></span>
                   <span>💡 Hints: <strong>{roomSettings.hints}</strong></span>
+                  <span>🧩 Mode: <strong>{roomSettings.wordMode}</strong></span>
+                </div>
+
+                {/* Player Lobby Controls: Ready-up & Spectator Mode */}
+                <div className="lobby-user-controls">
+                  <button
+                    type="button"
+                    className={`ready-toggle-btn ${isMyReady ? 'is-ready' : ''}`}
+                    onClick={handleToggleReady}
+                  >
+                    {isMyReady ? '✅ You are Ready!' : '⌛ Click to Ready Up'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className={`spectator-toggle-btn ${isMySpectator ? 'is-spectating' : ''}`}
+                    onClick={handleToggleSpectator}
+                    title="Toggle spectator mode"
+                  >
+                    {isMySpectator ? '👁️ Spectating (Active)' : '👁️ Switch to Spectator'}
+                  </button>
                 </div>
 
                 {isHost || players.length <= 1 ? (
@@ -463,7 +515,7 @@ function Game({ socket }) {
         </div>
       )}
 
-      {/* Round End Recap Modal */}
+      {/* Round End Recap Modal with Replay Feature */}
       {gamePhase === 'ROUND_END' && roundEndData && (
         <div className="round-end-overlay">
           <div className="round-end-card">
@@ -473,6 +525,17 @@ function Game({ socket }) {
               <span>The secret word was:</span>
               <strong className="revealed-word">{roundEndData.word?.toUpperCase()}</strong>
             </div>
+
+            {roundEndData.nextDrawer && (
+              <p className="next-drawer-preview">Next Drawer: <strong>{roundEndData.nextDrawer}</strong></p>
+            )}
+
+            {roundEndData.hasReplay && (
+              <button type="button" className="replay-btn" onClick={handleReplay}>
+                🎬 Watch Drawing Replay
+              </button>
+            )}
+
             <p className="next-round-countdown">Next turn starting soon...</p>
           </div>
         </div>

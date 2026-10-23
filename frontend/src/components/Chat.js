@@ -10,14 +10,46 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
   };
 
   useEffect(() => {
+    // 1. Listen for standard receive_message
     const handleReceiveMessage = (data) => {
       setMessageList((list) => [...list, data]);
     };
 
+    // 2. Listen for PDF spec event: chat_message { playerId, playerName, text }
+    const handleChatMessage = (data) => {
+      // Avoid duplicate display if already handled via receive_message
+      // Only add if not duplicate
+      if (data && data.text) {
+        setMessageList((list) => {
+          const last = list[list.length - 1];
+          if (last && last.author === data.playerName && last.message === data.text) {
+            return list;
+          }
+          return [...list, {
+            author: data.playerName,
+            message: data.text,
+            isSystem: data.playerId === 'system',
+            alreadyGuessed: data.alreadyGuessed
+          }];
+        });
+      }
+    };
+
+    // 3. Listen for PDF spec event: guess_result { correct, playerId, playerName, points }
+    const handleGuessResult = (data) => {
+      if (data && data.correct) {
+        // Shown via system message
+      }
+    };
+
     socket.on('receive_message', handleReceiveMessage);
+    socket.on('chat_message', handleChatMessage);
+    socket.on('guess_result', handleGuessResult);
 
     return () => {
       socket.off('receive_message', handleReceiveMessage);
+      socket.off('chat_message', handleChatMessage);
+      socket.off('guess_result', handleGuessResult);
     };
   }, [socket]);
 
@@ -30,6 +62,14 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
     const trimmed = currentMessage.trim();
     if (!trimmed) return;
 
+    // Emit PDF spec events: guess or chat
+    if (gameStatus === 'DRAWING' && !isDrawer && !hasGuessed) {
+      socket.emit('guess', { text: trimmed });
+    } else {
+      socket.emit('chat', { text: trimmed });
+    }
+
+    // Also emit backward-compatible send_message
     const messageData = {
       roomId,
       author: username,
@@ -37,15 +77,15 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
       text: trimmed,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
-
     socket.emit('send_message', messageData);
+
     setCurrentMessage('');
   };
 
   const isDrawingTurn = isDrawer && gameStatus === 'DRAWING';
   let inputPlaceholder = "Type your guess here...";
   if (isDrawingTurn) {
-    inputPlaceholder = "You are drawing! Don't spoil the word!";
+    inputPlaceholder = "You are drawing! Chat with others...";
   } else if (hasGuessed && gameStatus === 'DRAWING') {
     inputPlaceholder = "You guessed it! Chat with others who guessed...";
   }
@@ -88,11 +128,10 @@ function Chat({ socket, roomId, username, isDrawer, hasGuessed, gameStatus }) {
           type="text"
           value={currentMessage}
           placeholder={inputPlaceholder}
-          disabled={isDrawingTurn}
           onChange={(e) => setCurrentMessage(e.target.value)}
           maxLength={100}
         />
-        <button type="submit" disabled={isDrawingTurn || !currentMessage.trim()}>
+        <button type="submit" disabled={!currentMessage.trim()}>
           Send
         </button>
       </form>

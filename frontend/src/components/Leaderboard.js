@@ -14,9 +14,24 @@ function Leaderboard({ players = [], currentDrawerId, isHost, currentUserId, soc
     }
   };
 
+  const handleBan = (targetId) => {
+    if (window.confirm('Are you sure you want to BAN this player from this room?')) {
+      socket.emit('ban_player', { targetId });
+      setSelectedPlayer(null);
+    }
+  };
+
   const handleVoteKick = (targetId) => {
     socket.emit('vote_kick', { targetId });
     setSelectedPlayer(null);
+  };
+
+  const handleReport = (targetId) => {
+    const reason = prompt('Reason for reporting this player:', 'Inappropriate behavior');
+    if (reason) {
+      socket.emit('report_player', { targetId, reason });
+      setSelectedPlayer(null);
+    }
   };
 
   return (
@@ -39,7 +54,7 @@ function Leaderboard({ players = [], currentDrawerId, isHost, currentUserId, soc
           return (
             <li
               key={player.id}
-              className={`player-card ${isDrawer ? 'is-drawer' : ''} ${player.hasGuessed ? 'has-guessed' : ''} ${isMe ? 'is-self' : ''}`}
+              className={`player-card ${isDrawer ? 'is-drawer' : ''} ${player.hasGuessed ? 'has-guessed' : ''} ${isMe ? 'is-self' : ''} ${player.isSpectator ? 'is-spectator' : ''}`}
               onClick={() => !isMe && setSelectedPlayer(isMenuOpen ? null : player.id)}
             >
               <div className="rank-col">{rankBadge}</div>
@@ -54,11 +69,15 @@ function Leaderboard({ players = [], currentDrawerId, isHost, currentUserId, soc
                     {player.username} {isMe ? '(You)' : ''}
                   </span>
                   {player.isHost && <span className="host-icon" title="Host">👑</span>}
+                  {player.isSpectator && <span className="spectator-icon" title="Spectator">👁️</span>}
                 </div>
                 <div className="player-score-row">
                   <span className="score-text">{player.score} pts</span>
                   {player.roundScore > 0 && (
                     <span className="round-score-pill">+{player.roundScore}</span>
+                  )}
+                  {player.isReady && !player.isHost && (
+                    <span className="ready-pill" title="Ready to play">✓ Ready</span>
                   )}
                 </div>
               </div>
@@ -70,25 +89,43 @@ function Leaderboard({ players = [], currentDrawerId, isHost, currentUserId, soc
                 )}
               </div>
 
-              {/* Moderation Dropdown Menu */}
+              {/* Moderation Dropdown Menu (Kick, Ban, VoteKick, Report) */}
               {isMenuOpen && !isMe && (
                 <div className="player-mod-menu" onClick={(e) => e.stopPropagation()}>
                   {isHost ? (
-                    <button 
-                      type="button" 
-                      className="mod-btn kick-btn"
-                      onClick={() => handleKick(player.id)}
-                    >
-                      👢 Kick Player
-                    </button>
+                    <>
+                      <button 
+                        type="button" 
+                        className="mod-btn kick-btn"
+                        onClick={() => handleKick(player.id)}
+                      >
+                        👢 Kick Player
+                      </button>
+                      <button 
+                        type="button" 
+                        className="mod-btn ban-btn"
+                        onClick={() => handleBan(player.id)}
+                      >
+                        🚫 Ban Player
+                      </button>
+                    </>
                   ) : (
-                    <button 
-                      type="button" 
-                      className="mod-btn votekick-btn"
-                      onClick={() => handleVoteKick(player.id)}
-                    >
-                      ⚠️ Vote to Kick
-                    </button>
+                    <>
+                      <button 
+                        type="button" 
+                        className="mod-btn votekick-btn"
+                        onClick={() => handleVoteKick(player.id)}
+                      >
+                        ⚠️ Vote to Kick
+                      </button>
+                      <button 
+                        type="button" 
+                        className="mod-btn report-btn"
+                        onClick={() => handleReport(player.id)}
+                      >
+                        🚩 Report Player
+                      </button>
+                    </>
                   )}
                 </div>
               )}

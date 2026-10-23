@@ -19,6 +19,7 @@ function Lobby({ socket }) {
   });
 
   const [roomIdInput, setRoomIdInput] = useState(urlRoomCode);
+  const [isSpectator, setIsSpectator] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [publicRooms, setPublicRooms] = useState([]);
   const [statusError, setStatusError] = useState('');
@@ -31,7 +32,8 @@ function Lobby({ socket }) {
     wordCount: 3,
     hints: 2,
     wordCategory: 'all',
-    wordMode: 'normal',
+    wordMode: 'normal', // 'normal' | 'hidden' | 'combination'
+    language: 'en', // 'en' | 'es' | 'de' | 'fr'
     customWords: '',
     isPrivate: false
   });
@@ -94,7 +96,7 @@ function Lobby({ socket }) {
       return;
     }
     saveProfile();
-    navigate(`/game/${code}`, { state: { username, avatar } });
+    navigate(`/game/${code}`, { state: { username, avatar, isSpectator } });
   };
 
   // Quick Play / Join Random Public Room
@@ -109,14 +111,14 @@ function Lobby({ socket }) {
       // Pick first room with open spots
       const openRoom = publicRooms.find(r => r.playerCount < r.maxPlayers && r.status === 'WAITING');
       if (openRoom) {
-        navigate(`/game/${openRoom.roomId}`, { state: { username, avatar } });
+        navigate(`/game/${openRoom.roomId}`, { state: { username, avatar, isSpectator } });
         return;
       }
     }
 
     // Otherwise create a quick public room
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    navigate(`/game/${randomCode}`, { state: { username, avatar, initialSettings: { isPrivate: false } } });
+    navigate(`/game/${randomCode}`, { state: { username, avatar, isSpectator, initialSettings: { isPrivate: false } } });
   };
 
   // Create Custom Room
@@ -133,6 +135,7 @@ function Lobby({ socket }) {
       state: {
         username,
         avatar,
+        isSpectator,
         initialSettings: settings,
         isCreator: true
       }
@@ -175,6 +178,14 @@ function Lobby({ socket }) {
               maxLength={16}
               required
             />
+            <label className="spectator-toggle-label">
+              <input
+                type="checkbox"
+                checked={isSpectator}
+                onChange={(e) => setIsSpectator(e.target.checked)}
+              />
+              <span>👁️ Spectator Mode (Watch without playing)</span>
+            </label>
           </div>
         </div>
 
@@ -218,6 +229,7 @@ function Lobby({ socket }) {
                     <th>Room Code</th>
                     <th>Players</th>
                     <th>Category</th>
+                    <th>Lang / Mode</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -227,6 +239,7 @@ function Lobby({ socket }) {
                       <td><strong>{room.roomId}</strong></td>
                       <td>{room.playerCount} / {room.maxPlayers}</td>
                       <td>{room.category}</td>
+                      <td>{(room.language || 'en').toUpperCase()} · {room.wordMode || 'normal'}</td>
                       <td>
                         <button
                           type="button"
@@ -279,6 +292,7 @@ function Lobby({ socket }) {
                   value={settings.drawTime}
                   onChange={(e) => setSettings({ ...settings, drawTime: parseInt(e.target.value) })}
                 >
+                  <option value={15}>15 seconds</option>
                   <option value={30}>30 seconds</option>
                   <option value={45}>45 seconds</option>
                   <option value={60}>60 seconds (Standard)</option>
@@ -286,6 +300,7 @@ function Lobby({ socket }) {
                   <option value={100}>100 seconds</option>
                   <option value={120}>120 seconds</option>
                   <option value={180}>180 seconds</option>
+                  <option value={240}>240 seconds</option>
                 </select>
               </div>
 
@@ -351,6 +366,20 @@ function Lobby({ socket }) {
                 >
                   <option value="normal">Normal (reveals letters & length)</option>
                   <option value="hidden">Hidden (no length or hints shown)</option>
+                  <option value="combination">Combination (2-word phrases e.g. "flying car")</option>
+                </select>
+              </div>
+
+              <div className="setting-row">
+                <label>Language:</label>
+                <select
+                  value={settings.language}
+                  onChange={(e) => setSettings({ ...settings, language: e.target.value })}
+                >
+                  <option value="en">English 🇬🇧</option>
+                  <option value="es">Español 🇪🇸</option>
+                  <option value="de">Deutsch 🇩🇪</option>
+                  <option value="fr">Français 🇫🇷</option>
                 </select>
               </div>
 

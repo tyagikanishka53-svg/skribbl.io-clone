@@ -12,7 +12,8 @@ class Player {
     this.hasGuessed = false;
     this.guessRank = 0;
     this.isHost = isHost;
-    this.isReady = false;
+    this.isReady = isHost ? true : false;
+    this.isSpectator = false;
     this.votedToKick = new Set();
   }
 
@@ -36,7 +37,8 @@ class Player {
       roundScore: this.roundScore,
       hasGuessed: this.hasGuessed,
       isHost: this.isHost,
-      isReady: this.isReady
+      isReady: this.isReady,
+      isSpectator: this.isSpectator
     };
   }
 }

@@ -22,23 +22,68 @@ function Toolbox({
   brushSize, 
   setBrushSize, 
   clearCanvas, 
+  activeTool = 'brush',
+  setActiveTool,
   isEraser, 
   setIsEraser,
   undoLastStroke 
 }) {
+  const currentTool = activeTool || (isEraser ? 'eraser' : 'brush');
+
+  const setTool = (tool) => {
+    if (setActiveTool) {
+      setActiveTool(tool);
+    }
+    if (setIsEraser) {
+      setIsEraser(tool === 'eraser');
+    }
+  };
+
   return (
     <div className="toolbox">
+      {/* Tools Section: Brush, Bucket Fill, Eraser */}
+      <div className="drawing-modes">
+        <button
+          type="button"
+          className={`mode-btn ${currentTool === 'brush' ? 'active-mode' : ''}`}
+          onClick={() => setTool('brush')}
+          title="Pen / Brush Tool"
+        >
+          ✏️ Brush
+        </button>
+
+        <button
+          type="button"
+          className={`mode-btn ${currentTool === 'fill' ? 'active-mode' : ''}`}
+          onClick={() => setTool('fill')}
+          title="Fill Bucket Tool"
+        >
+          🪣 Fill
+        </button>
+
+        <button 
+          type="button"
+          className={`mode-btn ${currentTool === 'eraser' ? 'active-mode' : ''}`} 
+          onClick={() => setTool(currentTool === 'eraser' ? 'brush' : 'eraser')}
+          title="Eraser Tool"
+        >
+          🧹 Eraser
+        </button>
+      </div>
+
       {/* Colors Section */}
       <div className="palette-grid">
         {PALETTE.map((c) => (
           <button
             key={c}
             type="button"
-            className={`color-btn ${color === c && !isEraser ? 'active-color' : ''}`}
+            className={`color-btn ${color === c && currentTool !== 'eraser' ? 'active-color' : ''}`}
             style={{ backgroundColor: c }}
             onClick={() => {
               setColor(c);
-              setIsEraser(false);
+              if (currentTool === 'eraser') {
+                setTool('brush');
+              }
             }}
             title={c}
           />
@@ -51,10 +96,9 @@ function Toolbox({
           <button
             key={size}
             type="button"
-            className={`brush-size-btn ${brushSize === size && !isEraser ? 'active' : ''}`}
+            className={`brush-size-btn ${brushSize === size && currentTool !== 'fill' ? 'active' : ''}`}
             onClick={() => {
               setBrushSize(size);
-              setIsEraser(false);
             }}
             title={`${label} (${size}px)`}
           >
@@ -66,17 +110,8 @@ function Toolbox({
         ))}
       </div>
 
-      {/* Tool Action Buttons: Eraser, Undo, Clear */}
+      {/* Tool Action Buttons: Undo, Clear */}
       <div className="tool-actions">
-        <button 
-          type="button"
-          className={`action-btn eraser-btn ${isEraser ? 'active' : ''}`} 
-          onClick={() => setIsEraser(!isEraser)}
-          title="Toggle Eraser"
-        >
-          🧹 Eraser
-        </button>
-
         <button 
           type="button"
           className="action-btn undo-btn" 

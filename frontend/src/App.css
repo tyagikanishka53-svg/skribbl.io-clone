@@ -1365,3 +1365,206 @@ body {
     height: 250px;
   }
 }
+
+/* =========================================
+   ADDITIONAL STYLES FOR NEW PDF FUNCTIONALITY
+   ========================================= */
+
+/* Drawing Modes in Toolbox */
+.drawing-modes {
+  display: flex;
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.mode-btn {
+  background: transparent;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mode-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.mode-btn.active-mode {
+  background: #3b82f6;
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.cursor-fill {
+  cursor: crosshair;
+}
+
+/* Canvas Replay Badge */
+.canvas-replay-badge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(16, 185, 129, 0.95);
+  color: #ffffff;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  animation: pulse 1.5s infinite;
+  z-index: 10;
+}
+
+@keyframes pulse {
+  0% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.04); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+
+/* Lobby User Controls (Ready & Spectator) */
+.lobby-user-controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.ready-toggle-btn {
+  background: #f59e0b;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 3px 8px rgba(245, 158, 11, 0.3);
+}
+
+.ready-toggle-btn.is-ready {
+  background: #10b981;
+  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.3);
+}
+
+.spectator-toggle-btn {
+  background: #e2e8f0;
+  color: #475569;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.spectator-toggle-btn.is-spectating {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.ready-badge-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-top: 4px;
+}
+
+.ready-badge-pill.ready {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.ready-badge-pill.waiting {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.lobby-player-bubble.ready-glow {
+  border-color: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+}
+
+/* Spectator Label on Lobby page */
+.spectator-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.spectator-toggle-label input {
+  cursor: pointer;
+}
+
+/* Replay button in Round End Modal */
+.replay-btn {
+  margin: 12px auto;
+  display: block;
+  background: #8b5cf6;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(139, 92, 246, 0.3);
+  transition: transform 0.15s;
+}
+
+.replay-btn:hover {
+  transform: translateY(-2px);
+}
+
+.next-drawer-preview {
+  font-size: 14px;
+  color: #475569;
+  margin-top: 6px;
+}
+
+/* Leaderboard Mod Buttons & Badges */
+.spectator-icon {
+  font-size: 13px;
+}
+
+.ready-pill {
+  font-size: 10px;
+  font-weight: 700;
+  background: #dcfce7;
+  color: #15803d;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 6px;
+}
+
+.is-spectator {
+  opacity: 0.85;
+  background: #f8fafc;
+}
+
+.ban-btn {
+  background: #b91c1c !important;
+  color: white !important;
+}
+
+.report-btn {
+  background: #f59e0b !important;
+  color: white !important;
+}

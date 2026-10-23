@@ -1,4 +1,4 @@
-const Game = require('./Game');
+const Game = require('./game');
 
 class Room {
   constructor({ id, isPrivate = false, settings = {}, io }) {
@@ -15,7 +15,8 @@ class Room {
       wordCount: Math.min(5, Math.max(1, parseInt(settings.wordCount, 10) || 3)),
       hints: settings.hints !== undefined ? Math.min(5, Math.max(0, parseInt(settings.hints, 10))) : 2,
       wordCategory: settings.wordCategory || 'all',
-      wordMode: settings.wordMode || 'normal', // 'normal' | 'hidden'
+      wordMode: settings.wordMode || 'normal', // 'normal' | 'hidden' | 'combination'
+      language: settings.language || 'en', // 'en' | 'es' | 'de' | 'fr'
       customWords: Array.isArray(settings.customWords) 
         ? settings.customWords 
         : (typeof settings.customWords === 'string' && settings.customWords.trim()
@@ -27,15 +28,22 @@ class Room {
     this.hostId = null;
     this.game = new Game(this, io);
     this.votekicks = new Map(); // targetId -> Set(voterIds)
+    this.bannedPlayers = new Set(); // Set of banned usernames (lowercase)
+    this.reports = new Map(); // targetId -> Array of reports
   }
 
   addPlayer(player) {
+    if (this.bannedPlayers.has(player.username.toLowerCase()) || this.bannedPlayers.has(player.id)) {
+      return { success: false, reason: 'You have been banned from this room.' };
+    }
+
     if (this.players.size >= this.settings.maxPlayers) {
       return { success: false, reason: 'Room is full' };
     }
 
     if (this.players.size === 0) {
       player.isHost = true;
+      player.isReady = true;
       this.hostId = player.id;
     }
 
@@ -60,11 +68,52 @@ class Room {
     if (this.hostId === socketId && this.players.size > 0) {
       const nextHost = this.players.values().next().value;
       nextHost.isHost = true;
+      nextHost.isReady = true;
       this.hostId = nextHost.id;
       this.broadcast('host_changed', { hostId: this.hostId, hostName: nextHost.username });
     }
 
     return player;
+  }
+
+  banPlayer(targetId) {
+    const player = this.players.get(targetId);
+    if (!player) return null;
+
+    this.bannedPlayers.add(player.username.toLowerCase());
+    this.bannedPlayers.add(targetId);
+    return this.removePlayer(targetId);
+  }
+
+  toggleReady(socketId) {
+    const player = this.players.get(socketId);
+    if (!player) return null;
+    player.isReady = !player.isReady;
+    return player.isReady;
+  }
+
+  toggleSpectator(socketId) {
+    const player = this.players.get(socketId);
+    if (!player) return null;
+    player.isSpectator = !player.isSpectator;
+    return player.isSpectator;
+  }
+
+  reportPlayer(reporterId, targetId, reason = 'Inappropriate behavior') {
+    const target = this.players.get(targetId);
+    const reporter = this.players.get(reporterId);
+    if (!target || !reporter) return false;
+
+    if (!this.reports.has(targetId)) {
+      this.reports.set(targetId, []);
+    }
+    this.reports.get(targetId).push({
+      reporterName: reporter.username,
+      reason,
+      time: Date.now()
+    });
+
+    return true;
   }
 
   updateSettings(newSettings) {
@@ -92,6 +141,9 @@ class Room {
     }
     if (newSettings.wordMode !== undefined) {
       this.settings.wordMode = newSettings.wordMode;
+    }
+    if (newSettings.language !== undefined) {
+      this.settings.language = newSettings.language;
     }
     if (newSettings.customWords !== undefined) {
       this.settings.customWords = Array.isArray(newSettings.customWords)
@@ -143,7 +195,9 @@ class Room {
       rounds: this.settings.rounds,
       status: this.game.status,
       isPrivate: this.isPrivate,
-      category: this.settings.wordCategory
+      category: this.settings.wordCategory,
+      language: this.settings.language || 'en',
+      wordMode: this.settings.wordMode || 'normal'
     };
   }
 }

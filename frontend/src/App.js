@@ -35,7 +35,7 @@ console.log('[Skribbl Client] Connecting to backend at:', SERVER_URL);
 const socket = io(SERVER_URL, {
   transports: ['websocket', 'polling'],
   reconnection: true,
-  reconnectionAttempts: 10,
+  reconnectionAttempts: Infinity,
   reconnectionDelay: 1000
 });
 

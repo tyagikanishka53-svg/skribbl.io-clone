@@ -28,11 +28,14 @@ class Game {
     this.correctGuessCount = 0;
     this.strokes = []; // Stores complete drawing history for synchronization and undo
     this.currentStroke = null;
+    this.lastRoundStrokes = []; // Stored for round replay feature
   }
 
   start() {
-    if (this.room.players.size < 1) {
-      return { success: false, message: 'Need at least 1 player to start the game' };
+    // Non-spectators
+    const activePlayers = Array.from(this.room.players.values()).filter(p => !p.isSpectator);
+    if (activePlayers.length < 1) {
+      return { success: false, message: 'Need at least 1 active non-spectator player to start' };
     }
 
     this.maxRounds = this.room.settings.rounds || 3;
@@ -49,7 +52,7 @@ class Game {
     });
 
     this.currentRound = 1;
-    this.drawerOrder = Array.from(this.room.players.keys());
+    this.drawerOrder = activePlayers.map(p => p.id);
     this.currentDrawerIndex = 0;
 
     this.startDrawerTurn();
@@ -66,12 +69,18 @@ class Game {
     // Reset round states on players
     this.room.players.forEach(p => p.resetRound());
 
+    // Update active drawer list (exclude spectators)
+    const activePlayerIds = Array.from(this.room.players.values())
+      .filter(p => !p.isSpectator)
+      .map(p => p.id);
+
+    // Keep drawerOrder in sync with connected active players
+    this.drawerOrder = activePlayerIds;
+
     // Validate drawer index
     if (this.currentDrawerIndex >= this.drawerOrder.length) {
       this.currentRound++;
       this.currentDrawerIndex = 0;
-      // Re-evaluate drawer order in case players left/joined
-      this.drawerOrder = Array.from(this.room.players.keys());
     }
 
     if (this.currentRound > this.maxRounds || this.drawerOrder.length < 1) {
@@ -92,15 +101,18 @@ class Game {
     this.status = 'CHOOSING';
     this.currentWord = '';
 
-    // Generate word options
+    // Generate word options according to room settings
     const category = this.room.settings.wordCategory || 'all';
     const customWords = this.room.settings.customWords || [];
-    this.wordOptions = getRandomWords(this.wordCount, category, customWords);
+    const language = this.room.settings.language || 'en';
+    const wordMode = this.room.settings.wordMode || 'normal';
+
+    this.wordOptions = getRandomWords(this.wordCount, category, customWords, language, wordMode);
 
     // Broadcast clear canvas
     this.room.broadcast('canvas_clear');
 
-    // Notify all players that round turn started
+    // Notify all players that round turn started (PDF round_start event format)
     this.room.broadcast('round_start', {
       round: this.currentRound,
       maxRounds: this.maxRounds,
@@ -114,6 +126,17 @@ class Game {
     this.io.to(drawer.id).emit('word_options', {
       words: this.wordOptions,
       timeLimit: 15
+    });
+
+    // Also support round_start with wordOptions for drawer per PDF spec
+    this.io.to(drawer.id).emit('round_start', {
+      round: this.currentRound,
+      maxRounds: this.maxRounds,
+      drawerId: drawer.id,
+      drawerName: drawer.username,
+      wordOptions: this.wordOptions,
+      drawTime: this.drawTime,
+      status: 'Choose a word to draw!'
     });
 
     // 15 seconds to choose a word, otherwise auto-pick first option
@@ -132,7 +155,24 @@ class Game {
   }
 
   selectWord(playerId, word) {
-    if (this.status !== 'CHOOSING' || playerId !== this.currentDrawerId) {
+    if (this.status !== 'CHOOSING') {
+      return false;
+    }
+
+    // Resolve drawer player instance safely
+    let drawer = this.room.players.get(this.currentDrawerId);
+    if (!drawer) {
+      drawer = this.room.players.get(playerId);
+      if (drawer) {
+        this.currentDrawerId = drawer.id;
+      }
+    }
+
+    // If still no drawer found (e.g. disconnected), advance to next turn
+    if (!drawer) {
+      console.log('[Game] Drawer disconnected during choosing. Advancing to next turn.');
+      this.currentDrawerIndex++;
+      this.startDrawerTurn();
       return false;
     }
 
@@ -141,7 +181,6 @@ class Game {
     this.currentWord = word.trim().toLowerCase();
     this.revealedIndices.clear();
 
-    const drawer = this.room.players.get(this.currentDrawerId);
     const maskedHint = formatHint(this.currentWord, this.revealedIndices, this.wordMode);
 
     // Notify drawer with the secret word
@@ -150,14 +189,17 @@ class Game {
       isDrawer: true
     });
 
-    // Broadcast to everyone that drawing has started
+    // Broadcast to everyone that drawing has started (PDF game_state format)
     this.room.broadcast('game_state', {
+      phase: 'DRAWING',
       status: 'DRAWING',
       round: this.currentRound,
       maxRounds: this.maxRounds,
       drawerId: drawer.id,
       drawerName: drawer.username,
       wordHint: maskedHint,
+      word: maskedHint,
+      hints: 0,
       wordLength: this.currentWord.length,
       timeLeft: this.drawTime
     });
@@ -199,7 +241,6 @@ class Game {
     );
 
     // Spread reveals evenly through turn time
-    // E.g. If drawTime = 60s and 2 hints: reveal at 40s (after 20s) and 20s (after 40s)
     const intervalSec = this.drawTime / (maxReveals + 1);
 
     for (let h = 1; h <= maxReveals; h++) {
@@ -218,6 +259,20 @@ class Game {
           this.room.broadcast('hint_update', {
             wordHint: updatedHint
           });
+
+          // Also broadcast updated game_state for clients expecting game_state with hints
+          this.room.broadcast('game_state', {
+            phase: 'DRAWING',
+            status: 'DRAWING',
+            round: this.currentRound,
+            maxRounds: this.maxRounds,
+            drawerId: this.currentDrawerId,
+            drawerName: this.room.players.get(this.currentDrawerId)?.username || '',
+            wordHint: updatedHint,
+            word: updatedHint,
+            hints: this.revealedIndices.size,
+            timeLeft: this.timeLeft
+          });
         }
       }, revealAfterSeconds * 1000);
 
@@ -235,6 +290,11 @@ class Game {
       return { handled: false, isDrawer: true };
     }
 
+    // Spectator cannot gain points or end rounds
+    if (player.isSpectator) {
+      return { handled: false, isSpectator: true };
+    }
+
     // Already guessed
     if (player.hasGuessed) {
       return { handled: true, alreadyGuessed: true };
@@ -248,7 +308,7 @@ class Game {
       player.guessRank = this.correctGuessCount;
 
       // Scoring formula:
-      // Base: 200 pts, plus time bonus up to 300 pts, rank 1 bonus +50
+      // Base: 200 pts, plus time bonus up to 300 pts, rank 1 bonus +50, rank 2 bonus +25
       const timeBonus = Math.floor((this.timeLeft / this.drawTime) * 300);
       const rankBonus = player.guessRank === 1 ? 50 : (player.guessRank === 2 ? 25 : 0);
       const earned = Math.max(50, 200 + timeBonus + rankBonus);
@@ -262,9 +322,9 @@ class Game {
         drawer.addScore(drawerBonus);
       }
 
-      // Check if all guessers have guessed
+      // Check if all active guessers have guessed
       const guessers = Array.from(this.room.players.values()).filter(
-        p => p.id !== this.currentDrawerId
+        p => p.id !== this.currentDrawerId && !p.isSpectator
       );
       const allGuessed = guessers.length === 0 || guessers.every(p => p.hasGuessed);
 
@@ -292,9 +352,10 @@ class Game {
 
   // Drawing stroke handlers
   startStroke(data) {
-    if (this.status !== 'DRAWING') return;
+    if (this.status !== 'DRAWING') return null;
     const stroke = {
       id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      type: 'stroke',
       color: data.color || '#000000',
       size: data.size || 5,
       isEraser: !!data.isEraser,
@@ -302,16 +363,31 @@ class Game {
     };
     this.currentStroke = stroke;
     this.strokes.push(stroke);
+    return stroke;
   }
 
   addPoint(point) {
-    if (this.currentStroke) {
+    if (this.currentStroke && this.currentStroke.points) {
       this.currentStroke.points.push({ x: point.x, y: point.y });
     }
   }
 
   endStroke() {
     this.currentStroke = null;
+  }
+
+  // Flood fill action for bucket tool
+  addFill(data) {
+    if (this.status !== 'DRAWING') return null;
+    const fillAction = {
+      id: Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      type: 'fill',
+      x: data.x,
+      y: data.y,
+      color: data.color || '#000000'
+    };
+    this.strokes.push(fillAction);
+    return fillAction;
   }
 
   undoStroke() {
@@ -333,23 +409,40 @@ class Game {
 
     const drawer = this.room.players.get(this.currentDrawerId);
 
-    // Prepare scores overview
+    // Save strokes for round replay
+    this.lastRoundStrokes = [...this.strokes];
+
+    // Determine next drawer
+    const nextIndex = (this.currentDrawerIndex + 1);
+    const nextDrawerId = this.drawerOrder[nextIndex % (this.drawerOrder.length || 1)];
+    const nextDrawer = this.room.players.get(nextDrawerId);
+
+    // Prepare scores map and player list
+    const scoresMap = {};
+    this.room.players.forEach(p => {
+      scoresMap[p.username] = p.score;
+    });
+
     const playersList = Array.from(this.room.players.values()).map(p => p.toJSON());
 
+    // Emit round_end per PDF specification { word, scores, nextDrawer }
     this.room.broadcast('round_end', {
-      reason,
       word: this.currentWord,
+      scores: scoresMap,
+      nextDrawer: nextDrawer ? nextDrawer.username : 'None',
+      reason,
       drawerName: drawer ? drawer.username : 'Unknown',
-      players: playersList
+      players: playersList,
+      hasReplay: this.lastRoundStrokes.length > 0
     });
 
     // Move to next drawer
     this.currentDrawerIndex++;
 
-    // 4 seconds transition to next round or game over
+    // 4.5 seconds transition to next round or game over
     this.timer = setTimeout(() => {
       this.startDrawerTurn();
-    }, 4000);
+    }, 4500);
   }
 
   endGame() {
@@ -363,6 +456,7 @@ class Game {
 
     const winner = leaderboard[0] || null;
 
+    // Emit game_over per PDF spec { winner, leaderboard }
     this.room.broadcast('game_over', {
       winner,
       leaderboard
@@ -402,12 +496,15 @@ class Game {
       this.status = 'WAITING';
       this.room.broadcast('status_message', 'Waiting for more players to join...');
       this.room.broadcast('game_state', {
+        phase: 'WAITING',
         status: 'WAITING',
         round: 0,
         maxRounds: this.maxRounds,
         drawerId: null,
         drawerName: '',
         wordHint: '',
+        word: '',
+        hints: 0,
         timeLeft: 0
       });
     }

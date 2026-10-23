@@ -1,6 +1,90 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Toolbox from './Toolbox';
 
+// Fast flood fill implementation on HTML5 Canvas
+function floodFill(ctx, startX, startY, fillHex, width = 800, height = 500) {
+  startX = Math.floor(startX);
+  startY = Math.floor(startY);
+  if (startX < 0 || startX >= width || startY < 0 || startY >= height) return;
+
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  // parse hex to rgba
+  let hex = (fillHex || '#000000').replace('#', '');
+  if (hex.length === 3) {
+    hex = hex.split('').map(c => c + c).join('');
+  }
+  const fillR = parseInt(hex.substring(0, 2), 16) || 0;
+  const fillG = parseInt(hex.substring(2, 4), 16) || 0;
+  const fillB = parseInt(hex.substring(4, 6), 16) || 0;
+  const fillA = 255;
+
+  const startIdx = (startY * width + startX) * 4;
+  const startR = data[startIdx];
+  const startG = data[startIdx + 1];
+  const startB = data[startIdx + 2];
+  const startA = data[startIdx + 3];
+
+  // Already the target color
+  if (
+    Math.abs(startR - fillR) < 10 &&
+    Math.abs(startG - fillG) < 10 &&
+    Math.abs(startB - fillB) < 10 &&
+    Math.abs(startA - fillA) < 10
+  ) {
+    return;
+  }
+
+  const matchTarget = (idx) => {
+    return (
+      Math.abs(data[idx] - startR) < 30 &&
+      Math.abs(data[idx + 1] - startG) < 30 &&
+      Math.abs(data[idx + 2] - startB) < 30 &&
+      Math.abs(data[idx + 3] - startA) < 30
+    );
+  };
+
+  const stack = [startX, startY];
+  const visited = new Uint8Array(width * height);
+  visited[startY * width + startX] = 1;
+
+  while (stack.length > 0) {
+    const cy = stack.pop();
+    const cx = stack.pop();
+    const idx = (cy * width + cx) * 4;
+
+    data[idx] = fillR;
+    data[idx + 1] = fillG;
+    data[idx + 2] = fillB;
+    data[idx + 3] = fillA;
+
+    const neighbors = [
+      [cx + 1, cy],
+      [cx - 1, cy],
+      [cx, cy + 1],
+      [cx, cy - 1]
+    ];
+
+    for (let i = 0; i < 4; i++) {
+      const nx = neighbors[i][0];
+      const ny = neighbors[i][1];
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        const nPos = ny * width + nx;
+        if (!visited[nPos]) {
+          visited[nPos] = 1;
+          const nIdx = nPos * 4;
+          if (matchTarget(nIdx)) {
+            stack.push(nx, ny);
+          }
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
 function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
   const canvasRef = useRef(null);
   const contextRef = useRef(null);
@@ -9,7 +93,9 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
   // Toolbox State
   const [color, setColor] = useState('#000000');
   const [brushSize, setBrushSize] = useState(7);
-  const [isEraser, setIsEraser] = useState(false);
+  const [activeTool, setActiveTool] = useState('brush'); // 'brush' | 'fill' | 'eraser'
+  const [isReplaying, setIsReplaying] = useState(false);
+  const replayTimerRef = useRef(null);
 
   // Re-draw all strokes from history
   const redrawCanvas = useCallback((strokes) => {
@@ -24,6 +110,11 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     if (!strokes || strokes.length === 0) return;
 
     strokes.forEach((stroke) => {
+      if (stroke.type === 'fill') {
+        floodFill(ctx, stroke.x, stroke.y, stroke.color, canvas.width, canvas.height);
+        return;
+      }
+
       if (!stroke.points || stroke.points.length === 0) return;
 
       ctx.beginPath();
@@ -40,6 +131,73 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       }
       ctx.stroke();
     });
+  }, []);
+
+  // Replay animation function
+  const playReplayAnimation = useCallback((strokes) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !strokes || strokes.length === 0) return;
+
+    setIsReplaying(true);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    let strokeIndex = 0;
+    let pointIndex = 0;
+
+    if (replayTimerRef.current) {
+      clearInterval(replayTimerRef.current);
+    }
+
+    replayTimerRef.current = setInterval(() => {
+      if (strokeIndex >= strokes.length) {
+        clearInterval(replayTimerRef.current);
+        replayTimerRef.current = null;
+        setIsReplaying(false);
+        return;
+      }
+
+      const stroke = strokes[strokeIndex];
+
+      if (stroke.type === 'fill') {
+        floodFill(ctx, stroke.x, stroke.y, stroke.color, canvas.width, canvas.height);
+        strokeIndex++;
+        pointIndex = 0;
+        return;
+      }
+
+      if (!stroke.points || stroke.points.length === 0) {
+        strokeIndex++;
+        pointIndex = 0;
+        return;
+      }
+
+      ctx.strokeStyle = stroke.isEraser ? '#ffffff' : (stroke.color || '#000000');
+      ctx.lineWidth = stroke.size || 5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (pointIndex === 0) {
+        ctx.beginPath();
+        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      }
+
+      pointIndex += 2;
+      if (pointIndex < stroke.points.length) {
+        ctx.lineTo(stroke.points[pointIndex].x, stroke.points[pointIndex].y);
+        ctx.stroke();
+      } else {
+        if (stroke.points.length > 1) {
+          const last = stroke.points[stroke.points.length - 1];
+          ctx.lineTo(last.x, last.y);
+          ctx.stroke();
+        }
+        ctx.closePath();
+        strokeIndex++;
+        pointIndex = 0;
+      }
+    }, 25);
   }, []);
 
   useEffect(() => {
@@ -79,18 +237,25 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       contextRef.current.closePath();
     };
 
+    const handleDrawFill = (data) => {
+      if (!contextRef.current || !canvasRef.current) return;
+      floodFill(contextRef.current, data.x, data.y, data.color, canvasRef.current.width, canvasRef.current.height);
+    };
+
     const handleDrawData = (data) => {
       if (!contextRef.current) return;
-      const { offsetX, offsetY, isStarting, strokeColor, strokeSize } = data;
-      contextRef.current.strokeStyle = strokeColor;
-      contextRef.current.lineWidth = strokeSize;
-
-      if (isStarting) {
+      if (data.type === 'start') {
+        contextRef.current.strokeStyle = data.isEraser ? '#ffffff' : data.color;
+        contextRef.current.lineWidth = data.size;
         contextRef.current.beginPath();
-        contextRef.current.moveTo(offsetX, offsetY);
-      } else {
-        contextRef.current.lineTo(offsetX, offsetY);
+        contextRef.current.moveTo(data.x, data.y);
+      } else if (data.type === 'move') {
+        contextRef.current.lineTo(data.x, data.y);
         contextRef.current.stroke();
+      } else if (data.type === 'end') {
+        contextRef.current.closePath();
+      } else if (data.type === 'fill') {
+        floodFill(contextRef.current, data.x, data.y, data.color, canvasRef.current.width, canvasRef.current.height);
       }
     };
 
@@ -106,22 +271,35 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       }
     };
 
+    const handleRoundReplay = (data) => {
+      if (data && data.strokes) {
+        playReplayAnimation(data.strokes);
+      }
+    };
+
     socket.on('draw_start', handleDrawStart);
     socket.on('draw_move', handleDrawMove);
     socket.on('draw_end', handleDrawEnd);
+    socket.on('draw_fill', handleDrawFill);
     socket.on('draw_data', handleDrawData);
+    socket.on('canvas_clear', handleClearCanvas);
     socket.on('clear_canvas', handleClearCanvas);
     socket.on('canvas_sync', handleCanvasSync);
+    socket.on('round_replay', handleRoundReplay);
 
     return () => {
+      if (replayTimerRef.current) clearInterval(replayTimerRef.current);
       socket.off('draw_start', handleDrawStart);
       socket.off('draw_move', handleDrawMove);
       socket.off('draw_end', handleDrawEnd);
+      socket.off('draw_fill', handleDrawFill);
       socket.off('draw_data', handleDrawData);
+      socket.off('canvas_clear', handleClearCanvas);
       socket.off('clear_canvas', handleClearCanvas);
       socket.off('canvas_sync', handleCanvasSync);
+      socket.off('round_replay', handleRoundReplay);
     };
-  }, [socket, redrawCanvas]);
+  }, [socket, redrawCanvas, playReplayAnimation]);
 
   // Compute exact coordinates normalized to internal 800x500 canvas resolution
   const getCanvasCoords = (e) => {
@@ -147,11 +325,31 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     };
   };
 
+  const handleCanvasClick = (e) => {
+    if (!isDrawer || !canDraw) return;
+
+    if (activeTool === 'fill') {
+      const { x, y } = getCanvasCoords(e);
+      const canvas = canvasRef.current;
+      const ctx = contextRef.current;
+      if (canvas && ctx) {
+        floodFill(ctx, x, y, color, canvas.width, canvas.height);
+        socket.emit('draw_fill', { roomId, x, y, color });
+      }
+    }
+  };
+
   const startDrawing = (e) => {
     if (!isDrawer || !canDraw) return;
+    if (activeTool === 'fill') {
+      handleCanvasClick(e);
+      return;
+    }
+
     if (e.type === 'touchstart') e.preventDefault();
 
     const { x, y } = getCanvasCoords(e);
+    const isEraser = activeTool === 'eraser';
     const activeColor = isEraser ? '#ffffff' : color;
 
     contextRef.current.strokeStyle = activeColor;
@@ -173,7 +371,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
   };
 
   const draw = (e) => {
-    if (!isDrawingRef.current || !isDrawer || !canDraw) return;
+    if (!isDrawingRef.current || !isDrawer || !canDraw || activeTool === 'fill') return;
     if (e.type === 'touchmove') e.preventDefault();
 
     const { x, y } = getCanvasCoords(e);
@@ -188,7 +386,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     });
   };
 
-  const finishDrawing = (e) => {
+  const finishDrawing = () => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
     contextRef.current.closePath();
@@ -203,6 +401,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       contextRef.current.fillStyle = '#ffffff';
       contextRef.current.fillRect(0, 0, canvas.width, canvas.height);
     }
+    socket.emit('canvas_clear', { roomId });
     socket.emit('clear_canvas', { roomId });
   };
 
@@ -216,7 +415,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
       <div className="canvas-frame">
         <canvas
           ref={canvasRef}
-          className={`skribbl-canvas ${isDrawer && canDraw ? 'drawer-active' : 'spectator'}`}
+          className={`skribbl-canvas ${isDrawer && canDraw ? 'drawer-active' : 'spectator'} ${activeTool === 'fill' ? 'cursor-fill' : ''}`}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={finishDrawing}
@@ -225,7 +424,14 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
           onTouchMove={draw}
           onTouchEnd={finishDrawing}
         />
-        {!isDrawer && (
+
+        {isReplaying && (
+          <div className="canvas-replay-badge">
+            <span>▶️ Replaying Last Round...</span>
+          </div>
+        )}
+
+        {!isDrawer && !isReplaying && (
           <div className="canvas-guesser-badge">
             <span>👁️ Guessing mode</span>
           </div>
@@ -239,8 +445,10 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
           brushSize={brushSize}
           setBrushSize={setBrushSize}
           clearCanvas={clearCanvas}
-          isEraser={isEraser}
-          setIsEraser={setIsEraser}
+          activeTool={activeTool}
+          setActiveTool={setActiveTool}
+          isEraser={activeTool === 'eraser'}
+          setIsEraser={(val) => setActiveTool(val ? 'eraser' : 'brush')}
           undoLastStroke={undoLastStroke}
         />
       )}
