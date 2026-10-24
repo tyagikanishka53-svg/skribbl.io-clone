@@ -68,11 +68,25 @@ function Game({ socket }) {
   const [isConnected, setIsConnected] = useState(socket.connected);
 
   const currentUserId = socket.id;
-  const isMyTurn = socket.id === drawerId;
   const myPlayer = players.find(p => p.id === socket.id);
+
+  // Checks socket ID, username, drawerName, or single-player test mode
+  const isMyTurn =
+    (socket.id && drawerId && socket.id === drawerId) ||
+    (username && drawerName && username === drawerName) ||
+    (myPlayer && drawerId && myPlayer.id === drawerId) ||
+    (myPlayer && drawerName && myPlayer.username === drawerName) ||
+    players.length === 1;
+
   const hasGuessed = !!myPlayer?.hasGuessed;
   const isMyReady = !!myPlayer?.isReady;
   const isMySpectator = !!myPlayer?.isSpectator;
+
+  // Formats hint underscores with spaces for clean UI display (e.g. "b_n_n_" -> "B _ N _ N _")
+  const formatHintDisplay = (hint) => {
+    if (!hint) return '';
+    return hint.split('').map(char => (char === '_' ? '_' : char.toUpperCase())).join(' ');
+  };
 
   // Fallback so the user always sees their own profile even before initial socket roundtrip
   const displayPlayers = players.length > 0 ? players : [
@@ -90,10 +104,40 @@ function Game({ socket }) {
   ];
 
   useEffect(() => {
-    const handleConnect = () => setIsConnected(true);
+    // Helper function to emit room join or creation
+    const sendJoin = () => {
+      if (!socket) return;
+      if (isCreator && initialSettings) {
+        socket.emit('create_room', {
+          roomId,
+          hostName: username,
+          settings: initialSettings,
+          avatar,
+          isPrivate: initialSettings.isPrivate
+        });
+      } else {
+        socket.emit('join_room', {
+          roomId,
+          playerName: username,
+          username,
+          avatar,
+          isSpectator: initialSpectator
+        });
+      }
+    };
+
+    // Connection Handlers
+    const handleConnect = () => {
+      setIsConnected(true);
+      sendJoin(); // Guarantees room registration when connection completes
+    };
+
     const handleDisconnect = () => setIsConnected(false);
 
-    // 1. Setup Socket Event Listeners
+    // Register Socket Event Listeners
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+
     const handleJoinSuccess = ({ players: incomingPlayers, settings, isHost: hostStatus }) => {
       setPlayers(incomingPlayers || []);
       setIsConnected(true);
@@ -104,8 +148,6 @@ function Game({ socket }) {
 
     socket.on('join_success', handleJoinSuccess);
     socket.on('room_created', handleJoinSuccess);
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
 
     socket.on('player_joined', ({ player, players: incomingPlayers }) => {
       setPlayers(incomingPlayers || []);
@@ -166,22 +208,25 @@ function Game({ socket }) {
       setChooseTime(time);
     });
 
-    socket.on('word_chosen', ({ word }) => {
-      setSecretWord(word);
+    socket.on('word_chosen', ({ word, wordHint }) => {
+      if (word) setSecretWord(word);
+      if (wordHint) setWordHint(wordHint);
       setWordChoices([]);
       setGamePhase('DRAWING');
     });
 
-    socket.on('game_state', ({ status, phase, round, maxRounds, drawerId, drawerName, wordHint, timeLeft }) => {
-      const activePhase = phase || status || 'WAITING';
-      setGamePhase(activePhase);
+    socket.on('game_state', ({ status, phase, round, maxRounds, drawerId, drawerName, wordHint, secretWord: stateWord, timeLeft }) => {
+      const validPhases = ['WAITING', 'CHOOSING', 'DRAWING', 'ROUND_END', 'GAME_OVER'];
+      if (validPhases.includes(phase)) setGamePhase(phase);
+      else if (validPhases.includes(status)) setGamePhase(status);
+
       if (round) setCurrentRound(round);
       if (maxRounds) setMaxRounds(maxRounds);
       if (drawerId) setDrawerId(drawerId);
       if (drawerName) setDrawerName(drawerName);
+      if (stateWord) setSecretWord(stateWord);
       if (wordHint !== undefined) setWordHint(wordHint);
       if (timeLeft !== undefined) setTimeLeft(timeLeft);
-      setStatusMessage('');
     });
 
     socket.on('hint_update', ({ wordHint }) => {
@@ -226,29 +271,10 @@ function Game({ socket }) {
       setTimeout(() => setErrorMessage(''), 4000);
     });
 
-    // 2. Emit join or create room
-    const sendJoin = () => {
-      if (isCreator && initialSettings) {
-        socket.emit('create_room', {
-          roomId,
-          hostName: username,
-          settings: initialSettings,
-          avatar,
-          isPrivate: initialSettings.isPrivate
-        });
-      } else {
-        socket.emit('join_room', {
-          roomId,
-          playerName: username,
-          username,
-          avatar,
-          isSpectator: initialSpectator
-        });
-      }
-    };
-
     if (socket.connected) {
       sendJoin();
+    } else {
+      socket.connect();
     }
 
     return () => {
@@ -295,7 +321,9 @@ function Game({ socket }) {
   const handleSelectWord = (word) => {
     socket.emit('word_chosen', { word, roomId });
     socket.emit('select_word', { roomId, word });
+    setSecretWord(word);
     setWordChoices([]);
+    setGamePhase('DRAWING');
   };
 
   const handlePlayAgain = () => {
@@ -366,22 +394,24 @@ function Game({ socket }) {
           </div>
         )}
 
-        {/* Word Display / Hint */}
+        {/* Word Display / Hint Header */}
         <div className="nav-word-hint">
-          {gamePhase === 'DRAWING' ? (
-            isMyTurn ? (
-              <div className="word-drawer-view">
-                <span className="word-label">DRAW THIS:</span>
-                <span className="word-secret">{secretWord.toUpperCase()}</span>
-              </div>
-            ) : (
-              <div className="word-guesser-view">
-                <span className="word-hint-text">{wordHint}</span>
-                {roomSettings.wordMode !== 'hidden' && (
-                  <span className="word-length-hint">({wordHint.replace(/\s/g, '').length} letters)</span>
-                )}
-              </div>
-            )
+          {isMyTurn ? (
+            <div className="word-drawer-view">
+              <span className="word-label">DRAW THIS: </span>
+              <span className="word-secret">
+                {secretWord ? secretWord.toUpperCase() : 'CHOOSING A WORD...'}
+              </span>
+            </div>
+          ) : wordHint ? (
+            <div className="word-guesser-view">
+              <span className="word-hint-text">{formatHintDisplay(wordHint)}</span>
+              {roomSettings.wordMode !== 'hidden' && (
+                <span className="word-length-hint">
+                  ({wordHint.replace(/\s/g, '').length} letters)
+                </span>
+              )}
+            </div>
           ) : (
             <div className="phase-indicator-text">
               {statusMessage || (gamePhase === 'CHOOSING' ? `${drawerName} is choosing...` : 'Waiting for round')}
@@ -506,7 +536,7 @@ function Game({ socket }) {
               socket={socket}
               roomId={roomId}
               isDrawer={isMyTurn}
-              canDraw={gamePhase === 'DRAWING'}
+              canDraw={gamePhase === 'DRAWING' || gamePhase === 'CHOOSING' || isMyTurn}
             />
           )}
         </div>

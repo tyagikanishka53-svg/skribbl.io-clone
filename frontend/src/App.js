@@ -1,36 +1,17 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import io from 'socket.io-client';
+import { io } from 'socket.io-client';
 import Lobby from './pages/Lobby';
 import Game from './pages/Game';
 import './App.css';
 
-// Automatically detect the backend server URL across local IP, localhost, or production env
+// Automatically detect the backend server URL or default to your live Render backend
 const getBackendUrl = () => {
-  if (process.env.REACT_APP_BACKEND_URL) {
-    return process.env.REACT_APP_BACKEND_URL;
+  const envUrl = process.env.REACT_APP_BACKEND_URL;
+  if (envUrl && !envUrl.includes('your-backend-app')) {
+    return envUrl;
   }
-  
-  const { protocol, hostname, port } = window.location;
-  
-  // If served directly from the backend server on port 5000
-  if (port === '5000') {
-    return window.location.origin;
-  }
-  
-  // Development mode: auto-target backend on port 5000
-  if (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname.startsWith('192.168.') ||
-    hostname.startsWith('10.') ||
-    hostname.startsWith('172.')
-  ) {
-    return `${protocol}//${hostname}:5000`;
-  }
-
-  // Production fallback
-  return window.location.origin;
+  return 'https://skribbl-backend-vy86.onrender.com';
 };
 
 const SERVER_URL = getBackendUrl();

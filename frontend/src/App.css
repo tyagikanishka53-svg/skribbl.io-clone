@@ -619,6 +619,7 @@ body {
   position: relative;
   transition: all 0.2s;
   cursor: pointer;
+  user-select: none;
 }
 
 .player-card:hover {
@@ -705,26 +706,34 @@ body {
 
 .player-mod-menu {
   position: absolute;
-  right: 10px;
   top: 100%;
-  background: white;
+  right: 10px;
+  background: #ffffff;
+  border: 1px solid #ddd;
   border-radius: 8px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.25);
   padding: 6px;
-  z-index: 50;
+  z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 140px;
 }
 
 .mod-btn {
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: bold;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
   border: none;
+  background: transparent;
+  text-align: left;
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.mod-btn:hover {
+  background: #f0f0f0;
 }
 
 .kick-btn {
@@ -735,6 +744,16 @@ body {
 .votekick-btn {
   background: #fef3c7;
   color: #d97706;
+}
+
+.ban-btn {
+  background: #b91c1c !important;
+  color: white !important;
+}
+
+.report-btn {
+  background: #f59e0b !important;
+  color: white !important;
 }
 
 /* =========================================
@@ -1366,10 +1385,6 @@ body {
   }
 }
 
-/* =========================================
-   ADDITIONAL STYLES FOR NEW PDF FUNCTIONALITY
-   ========================================= */
-
 /* Drawing Modes in Toolbox */
 .drawing-modes {
   display: flex;
@@ -1424,12 +1439,6 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
   animation: pulse 1.5s infinite;
   z-index: 10;
-}
-
-@keyframes pulse {
-  0% { transform: translateX(-50%) scale(1); }
-  50% { transform: translateX(-50%) scale(1.04); }
-  100% { transform: translateX(-50%) scale(1); }
 }
 
 /* Lobby User Controls (Ready & Spectator) */
@@ -1558,50 +1567,68 @@ body {
   opacity: 0.85;
   background: #f8fafc;
 }
-
-.ban-btn {
-  background: #b91c1c !important;
-  color: white !important;
+/* Ensure lobby overlay fills canvas column and allows scrolling */
+.lobby-waiting-overlay {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
-.report-btn {
-  background: #f59e0b !important;
-  color: white !important;
-}
-.player-card {
-  position: relative;
-  cursor: pointer;
-  user-select: none;
-}
-
-.player-mod-menu {
-  position: absolute;
-  top: 100%;
-  right: 10px;
+/* Make card scrollable when controls exceed canvas height */
+.waiting-card {
   background: #ffffff;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  padding: 20px;
+  max-height: 85vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 6px;
-  z-index: 100;
-  min-width: 140px;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  width: 100%;
+  max-width: 520px;
 }
 
-.mod-btn {
-  padding: 8px 12px;
+/* Action group buttons */
+.lobby-actions-group,
+.guest-actions-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.start-game-btn {
+  background-color: #2ecc71;
+  color: #ffffff;
+  font-size: 1.1rem;
+  font-weight: bold;
+  padding: 12px 20px;
   border: none;
-  background: transparent;
-  text-align: left;
-  font-size: 13px;
-  font-weight: 600;
+  border-radius: 8px;
   cursor: pointer;
-  border-radius: 4px;
+  width: 100%;
+  transition: background-color 0.2s ease;
 }
 
-.mod-btn:hover { background: #f0f0f0; }
-.kick-btn { color: #e67e22; }
-.ban-btn { color: #e74c3c; }
-.votekick-btn { color: #f39c12; }
-.report-btn { color: #9b59b6; }
+.start-game-btn:hover {
+  background-color: #27ae60;
+}
+
+.open-tab-btn {
+  background-color: #3498db;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+}
