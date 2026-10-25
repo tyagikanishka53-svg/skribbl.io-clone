@@ -1709,7 +1709,10 @@ body, html, #root, .App {
   .copy-invite-btn {
     font-size: 0.8rem !important;
     max-width: fit-content !important;
+    white-space: nowrap !important;
   }
+
+  
 
   /* 2. Word Hint Prominent Row Fix */
   .word-hint, 
