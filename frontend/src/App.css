@@ -1779,3 +1779,50 @@ body, html, #root, .App {
     margin-top: 6px !important;
   }
 }
+/* Mobile Header & Round Badge Overlap Fix */
+@media (max-width: 600px) {
+  /* Main header card layout fix */
+  .game-header, 
+  .top-bar, 
+  .header-card, 
+  .lobby-header {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    padding: 10px 12px !important;
+    gap: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  /* Make logo and room details compact */
+  .logo, .skribbl-logo, h1 {
+    font-size: 1.2rem !important;
+  }
+
+  .room-info, .room-code {
+    font-size: 0.75rem !important;
+  }
+
+  /* Compact copy invite button */
+  .copy-invite-btn, 
+  button.copy-btn,
+  .copy-btn {
+    padding: 6px 8px !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Round badge alignment fix */
+  .round-badge, 
+  .round-info, 
+  .round-counter,
+  div[class*="round"] {
+    font-size: 0.75rem !important;
+    padding: 4px 8px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    margin: 0 !important;
+  }
+}
