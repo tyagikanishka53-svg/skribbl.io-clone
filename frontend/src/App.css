@@ -1676,3 +1676,20 @@ body, html, #root, .App {
     margin-top: 8px !important;
   }
 }
+/* Mobile Hint Text Layout Fix */
+@media (max-width: 600px) {
+  /* Hint container visibility fix */
+  .word-hint-container, 
+  .hint-container, 
+  .hint-text,
+  .word-display {
+    display: block !important;
+    visibility: visible !important;
+    font-size: 1.3rem !important;
+    letter-spacing: 3px !important;
+    text-align: center !important;
+    margin: 8px 0 !important;
+    color: #ffffff !important; /* Agar background dark hai toh white color */
+    z-index: 10 !important;
+  }
+}
