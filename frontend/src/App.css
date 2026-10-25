@@ -1676,20 +1676,106 @@ body, html, #root, .App {
     margin-top: 8px !important;
   }
 }
-/* Mobile Hint Text Layout Fix */
+/* ===================================================
+   COMPLETE MOBILE RESPONSIVE FIXES (CONSOLIDATED)
+   =================================================== */
+
+/* Universal Box-Sizing & Screen Boundary Fix */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body, html, #root, .App {
+  width: 100%;
+  overflow-x: hidden;
+}
+
 @media (max-width: 600px) {
-  /* Hint container visibility fix */
-  .word-hint-container, 
-  .hint-container, 
-  .hint-text,
-  .word-display {
+  /* 1. Header & Round Info Fix */
+  .game-header, 
+  .top-bar, 
+  .header-card,
+  .lobby-header {
+    flex-wrap: wrap !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 8px 12px !important;
+  }
+
+  .round-badge, 
+  .round-info, 
+  .room-code, 
+  .copy-invite-btn {
+    font-size: 0.8rem !important;
+    max-width: fit-content !important;
+  }
+
+  /* 2. Word Hint Prominent Row Fix */
+  .word-hint, 
+  .hint-box, 
+  .word-display, 
+  .current-word,
+  .hint-text {
+    width: 100% !important;
     display: block !important;
     visibility: visible !important;
-    font-size: 1.3rem !important;
-    letter-spacing: 3px !important;
     text-align: center !important;
-    margin: 8px 0 !important;
-    color: #ffffff !important; /* Agar background dark hai toh white color */
-    z-index: 10 !important;
+    font-size: 1.4rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 4px !important;
+    color: #1e293b !important;
+    margin: 6px 0 !important;
+    order: 10 !important;
+  }
+
+  /* 3. Compact Canvas & Lobby Containers */
+  .lobby-card, 
+  .lobby-container,
+  .waiting-card {
+    width: 95vw !important;
+    max-width: 100% !important;
+    padding: 12px !important;
+    margin: 8px auto !important;
+  }
+
+  .canvas-container, canvas {
+    max-height: 240px !important;
+    width: 100% !important;
+  }
+
+  /* 4. Chat & Input Box Visibility Fix */
+  .chat-container, .chat-box {
+    max-height: 220px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .chat-messages {
+    flex: 1 !important;
+    max-height: 130px !important;
+    overflow-y: auto !important;
+  }
+
+  .chat-input-form,
+  .nickname-group,
+  .join-room-row {
+    flex-direction: column !important;
+    width: 100% !important;
+    align-items: center !important;
+  }
+
+  .nickname-input,
+  .room-code-input,
+  input[type="text"] {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .join-room-btn,
+  .play-now-btn,
+  .create-room-btn {
+    width: 100% !important;
+    margin-top: 6px !important;
   }
 }
