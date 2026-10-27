@@ -8,14 +8,26 @@ function Lobby({ socket }) {
 
   const urlRoomCode = searchParams.get('room') || '';
 
-  // Player profile state
+  // Player profile state (persisted in localStorage)
   const [username, setUsername] = useState(
     localStorage.getItem('skribbl_username') || `Player${Math.floor(1000 + Math.random() * 9000)}`
   );
-  const [avatar, setAvatar] = useState({
-    color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    eyes: 0,
-    mouth: 0
+
+  // Avatar state (restored from localStorage if available)
+  const [avatar, setAvatar] = useState(() => {
+    const savedAvatar = localStorage.getItem('skribbl_avatar');
+    if (savedAvatar) {
+      try {
+        return JSON.parse(savedAvatar);
+      } catch (e) {
+        // Fallback to random avatar if parse fails
+      }
+    }
+    return {
+      color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+      eyes: 0,
+      mouth: 0
+    };
   });
 
   const [roomIdInput, setRoomIdInput] = useState(urlRoomCode);
@@ -80,8 +92,15 @@ function Lobby({ socket }) {
     setAvatar({ ...avatar, mouth: (avatar.mouth + 1) % 4 });
   };
 
-  const saveProfile = () => {
-    localStorage.setItem('skribbl_username', username);
+  // Helper function to save profile & session details before navigating
+  const saveSession = (targetRoomId) => {
+    const cleanName = username.trim();
+    localStorage.setItem('skribbl_username', cleanName);
+    localStorage.setItem('skribbl_playerName', cleanName);
+    if (targetRoomId) {
+      localStorage.setItem('skribbl_roomId', targetRoomId);
+    }
+    localStorage.setItem('skribbl_avatar', JSON.stringify(avatar));
   };
 
   // Join Room by Code or Direct
@@ -95,7 +114,7 @@ function Lobby({ socket }) {
       setStatusError('Please enter a Room Code');
       return;
     }
-    saveProfile();
+    saveSession(code);
     navigate(`/game/${code}`, { state: { username, avatar, isSpectator } });
   };
 
@@ -105,12 +124,12 @@ function Lobby({ socket }) {
       setStatusError('Please enter a username');
       return;
     }
-    saveProfile();
 
     if (publicRooms.length > 0) {
       // Pick first room with open spots
       const openRoom = publicRooms.find(r => r.playerCount < r.maxPlayers && r.status === 'WAITING');
       if (openRoom) {
+        saveSession(openRoom.roomId);
         navigate(`/game/${openRoom.roomId}`, { state: { username, avatar, isSpectator } });
         return;
       }
@@ -118,6 +137,7 @@ function Lobby({ socket }) {
 
     // Otherwise create a quick public room
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    saveSession(randomCode);
     navigate(`/game/${randomCode}`, { state: { username, avatar, isSpectator, initialSettings: { isPrivate: false } } });
   };
 
@@ -128,9 +148,10 @@ function Lobby({ socket }) {
       setStatusError('Please enter a username');
       return;
     }
-    saveProfile();
 
     const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    saveSession(randomCode);
+
     navigate(`/game/${randomCode}`, {
       state: {
         username,
@@ -191,7 +212,7 @@ function Lobby({ socket }) {
 
         <div className="action-buttons-group">
           <button type="button" className="main-btn play-btn" onClick={handleQuickPlay}>
-            🎮 Play Now (Quick Join)
+             Play Now (Quick Join)
           </button>
 
           <button 

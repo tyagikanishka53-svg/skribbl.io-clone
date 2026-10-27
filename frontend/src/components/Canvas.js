@@ -304,6 +304,27 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
     };
   }, [socket, redrawCanvas, playReplayAnimation]);
 
+  // Handle phone calls / app switching auto-reconnect & canvas sync
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && socket) {
+        const savedRoomId = localStorage.getItem('skribbl_roomId') || roomId;
+        const savedPlayerName = localStorage.getItem('skribbl_username') || localStorage.getItem('skribbl_playerName');
+
+        if (savedRoomId) {
+          socket.emit('rejoin_room', { roomId: savedRoomId, playerName: savedPlayerName });
+          socket.emit('request_canvas_sync', { roomId: savedRoomId });
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [socket, roomId]);
+
   // Compute exact coordinates normalized to internal 800x500 canvas resolution
   const getCanvasCoords = (e) => {
     const canvas = canvasRef.current;

@@ -252,6 +252,48 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 2b. Re-join & App Switch Visibility Sync Handlers
+  socket.on('rejoin_room', ({ roomId, playerName }) => {
+    const targetRoomId = (roomId || socketRoomMap.get(socket.id) || '').toString().trim().toUpperCase();
+    const room = rooms.get(targetRoomId);
+
+    if (room) {
+      socket.join(targetRoomId);
+      socketRoomMap.set(socket.id, targetRoomId);
+
+      // Re-map socket ID to player if returning after call / background switch
+      let player = room.players.find(p => p.username === playerName || p.id === socket.id);
+      if (player) {
+        player.id = socket.id;
+      }
+
+      const active = room.players.filter(p => !p.isSpectator);
+      const currentDrawer = active[room.currentDrawerIndex];
+
+      socket.emit('room_state', {
+        phase: room.phase,
+        round: room.currentRound,
+        maxRounds: room.settings.rounds,
+        drawerId: currentDrawer ? currentDrawer.id : '',
+        drawerName: currentDrawer ? currentDrawer.username : '',
+        wordHint: generateHint(room.currentWord || '', room.revealedIndexes || []),
+        timeLeft: room.timeLeft,
+        players: room.players,
+        settings: room.settings
+      });
+
+      socket.emit('canvas_sync', { strokes: room.strokesHistory });
+    }
+  });
+
+  socket.on('request_canvas_sync', ({ roomId }) => {
+    const targetRoomId = (roomId || socketRoomMap.get(socket.id) || '').toString().trim().toUpperCase();
+    const room = rooms.get(targetRoomId);
+    if (room && room.strokesHistory) {
+      socket.emit('canvas_sync', { strokes: room.strokesHistory });
+    }
+  });
+
   // 3. Lobby Controls: Ready Up & Spectator Mode
   socket.on('toggle_ready', () => {
     const roomId = socketRoomMap.get(socket.id);
