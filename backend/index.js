@@ -28,10 +28,11 @@ app.use(
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => callback(null, true), // Safely handles credentials + dynamic origins
+    origin: (origin, callback) => callback(null, true),
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  transports: ['websocket'], 
 });
 
 // Word lists categorized by type

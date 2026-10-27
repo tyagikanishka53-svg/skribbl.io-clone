@@ -89,6 +89,7 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
   const canvasRef = useRef(null);
   const contextRef = useRef(null);
   const isDrawingRef = useRef(false);
+  const lastEmitRef = useRef(0); // Ref for throttling socket event emission
 
   // Toolbox State
   const [color, setColor] = useState('#000000');
@@ -382,14 +383,20 @@ function Canvas({ socket, roomId, isDrawer, canDraw = true }) {
 
     const { x, y } = getCanvasCoords(e);
 
+    // 1. Render line locally instantly
     contextRef.current.lineTo(x, y);
     contextRef.current.stroke();
 
-    socket?.emit('draw_move', {
-      roomId,
-      x,
-      y,
-    });
+    // 2. Throttle socket emissions to once every 15ms (~60 FPS max)
+    const now = Date.now();
+    if (now - lastEmitRef.current >= 15) {
+      lastEmitRef.current = now;
+      socket?.emit('draw_move', {
+        roomId,
+        x,
+        y,
+      });
+    }
   };
 
   const finishDrawing = () => {

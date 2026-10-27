@@ -19,7 +19,7 @@ console.log('[Skribbl Client] Connecting to backend at:', SERVER_URL);
 
 // Production-ready Socket.IO client instance
 const socket = io(SERVER_URL, {
-  transports: ['websocket', 'polling'],
+  transports: ['websocket'],
   autoConnect: true,
   reconnection: true,
   reconnectionAttempts: Infinity,
